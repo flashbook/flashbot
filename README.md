@@ -5,7 +5,7 @@ Flashbot is a program for developing and running high-frequency Cryptocurrency t
 You can connect to it from Java, Python, or any client that speaks GraphQL.
 
 ## Install
-To run Flashbot, all you need to do is download the latest `flashbot.jar` from the [releases](https://github.com/flashbook/flashbot/releases) page.
+To run Flashbot, download the latest `flashbot.jar` from the [releases](https://github.com/flashbook/flashbot/releases) page.
 
 Get started by trying some of the [tutorials](https://github.com/flashbook/flashbot#tutorials) or run with the `--help` option to see usage info.
 ```bash
@@ -31,7 +31,7 @@ $ java -jar flashbot.jar server --dataDir=/my/data/dir
 
 The server processes market data as it's being ingested and provides all kinds of interesting data and aggregations via a GraphQL endpoint.
 
-Visit `http://localhost:9020/graphiql` to interactively explore and query the Flashbot GraphQL API.
+Visit `http://localhost:9020/graphiql` in a browser to interactively explore and query the Flashbot GraphQL API.
 
 ### Connect from Java or Python
 We can use the Flashbot Python client library and a Jupyter notebook to start exporing our data.
@@ -42,8 +42,32 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
     $ java -jar flashbot.jar server --exchanges=gdax --dataDir=/my/data/dir
     ```
 
-2. Open
+2. Install the client library
+    a. Java
+    Follow the instructions at [Java Library](https://github.com/flashbook/flashbot#java-library)
+    
+    b. Python
+    ```bash
+    pip install flashbot
+    ```
 
+3. Query the Flashbot server for some market data, in this case, the price of the best ask resting in the order book.
+    a. Java
+    ```java
+    import io.flashbook.flashbot.client.Client;
+    
+    Client client = new Client(9020);
+    Double bestAsk = client.orderBook('gdax', 50).asks.get(0).price;
+    ```
+    
+    b. Python
+    ```python
+    from flashbot import Client
+ 
+    client = Client(9020)
+    best_ask = client.order_book('gdax', 50).asks.get(0).price
+    ```
+    
 ### Run a sample strategy
 Now that we have a streaming source of market data in our `--dataDir` directory, we can run strategies on it. A strategy is identified by a fully qualified Java class name.
 
