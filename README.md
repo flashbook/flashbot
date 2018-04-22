@@ -52,7 +52,9 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
     ```
 
 3. Query the Flashbot server for some market data, in this case, the price of the best ask resting in the order book.
+
     a. Java
+    
     ```java
     import io.flashbook.flashbot.client.Client;
     
@@ -61,6 +63,7 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
     ```
     
     b. Python
+    
     ```python
     from flashbot import Client
  
