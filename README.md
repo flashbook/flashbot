@@ -44,9 +44,11 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
 2. Install the client library
 
     a. Java
+    
     Follow the instructions at [Java Library](https://github.com/flashbook/flashbot#java-library)
     
     b. Python
+    
     ```bash
     $ pip install flashbot
     ```
