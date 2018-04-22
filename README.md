@@ -19,7 +19,6 @@ Looking for the Java client library, or just want to run the server manually? Ju
 ### Ingest market data
 Let's start with the built-in GDAX market data for now. This connects to the GDAX REST and WebSocket APIs and saves order book data to disk in real time. Leave the following command running in a shell.
 ```bash
-# Run with --help to see all options
 $ java -jar flashbot.jar ingest --exchanges=gdax --dataDir=/my/data/dir
 ```
 
@@ -36,22 +35,23 @@ Visit `http://localhost:9020/graphiql` in a browser to interactively explore and
 ### Connect from Java or Python
 We can use the Flashbot Python client library and a Jupyter notebook to start exporing our data.
 
-1. First, run a Flashbot server in a new shell. This is what our Flashbot client will connect to.
+1. Start a Flashbot server, if not already running.
     ```bash
     # Starts a Flashbot server on the default port (9020)
     $ java -jar flashbot.jar server --exchanges=gdax --dataDir=/my/data/dir
     ```
 
 2. Install the client library
+
     a. Java
     Follow the instructions at [Java Library](https://github.com/flashbook/flashbot#java-library)
     
     b. Python
     ```bash
-    pip install flashbot
+    $ pip install flashbot
     ```
 
-3. Query the Flashbot server for some market data, in this case, the price of the best ask resting in the order book.
+3. Query the Flashbot server for some market data, in this case, we request an aggregated order book and look up the price of the best ask.
 
     a. Java
     
@@ -70,21 +70,19 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
     client = Client(9020)
     best_ask = client.order_book('gdax', 50).asks.get(0).price
     ```
-    
-### Run a sample strategy
-Now that we have a streaming source of market data in our `--dataDir` directory, we can run strategies on it. A strategy is identified by a fully qualified Java class name.
+
+### Run and optimize a sample strategy
+Flashbot comes with a few sample strategies in `io.flashbook.flashbot.strategies`. Let's run a Moving Average Crossover Strategy, a.k.a. the "Hello World" of algorithmic trading on some historical data.
 
 ```java
 import io.flashbook.flashbot.server.Server;
 import io.flashbook.flashbot.client.Client;
-import io.flashbook.flashbot.client.Config;
 
-// Create an in-memory server for testing
-Server server = new Server();
-Client client = new Client(server);
-
-client.run()
+Client fb = new Client(9020);
+fb.createBot("io.flashbook.flashbot.strategies.MovingAverageCrossover");
 ```
+
+###
 
 ## Java Library
 - `io.flashbook.flashbot.client.Client` for connecting to a running Flashbot server
