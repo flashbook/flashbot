@@ -25,6 +25,7 @@ $ java -jar flashbot.jar ingest --exchanges=gdax --dataDir=/my/data/dir
 ### Start a Flashbot server
 In another shell, we'll run the jar with the `server` command and point it at the directory we're ingesting to.
 ```bash
+# Starts a Flashbot server on the default port (9020)
 $ java -jar flashbot.jar server --dataDir=/my/data/dir
 ```
 
@@ -37,43 +38,23 @@ Here we'll use the Flashbot Java client library to start exporing our data. If y
 
 1. Start a Flashbot server, if not already running.
     ```bash
-    # Starts a Flashbot server on the default port (9020)
     $ java -jar flashbot.jar server --exchanges=gdax --dataDir=/my/data/dir
     ```
 
 2. Install the client library
-
-    **Java**
     
     Follow the [Java Library](https://github.com/flashbook/flashbot#java-library) instructions to get the Java client.
-    
-    **Python**
-    
-    ```bash
-    $ pip install flashbot
-    ```
 
 3. Query the Flashbot server for some market data, in this case, we request an aggregated order book and look up the price of the best ask.
 
-    **Java**
-    
     ```java
     import io.flashbook.flashbot.client.Client;
     
     Client client = new Client(9020);
     Double bestAsk = client.orderBook('gdax', 50).asks.get(0).price;
     ```
-    
-    **Python**
-    
-    ```python
-    from flashbot import Client
- 
-    client = Client(9020)
-    best_ask = client.order_book('gdax', 50).asks[0]['price']
-    ```
 
-### Run and optimize a sample strategy
+### Run and analyze a built-in strategy
 Flashbot comes with a few sample strategies in `io.flashbook.flashbot.strategies`. Let's run a Moving Average Crossover Strategy, a.k.a. the "Hello World" of algorithmic trading on some historical data.
 
 ```java
@@ -82,11 +63,16 @@ import io.flashbook.flashbot.client.Client;
 
 Client fb = new Client(9020);
 fb.newBot("io.flashbook.flashbot.strategies.MovingAverageCrossover");
-
-
 ```
 
-###
+### Optimize parameters of built-in strategy
+
+### Custom indicators & ordering logic
+
+### External data sources
+Our sample bot is currently looking at only historical order book data to make decisions. i.e. what everyone else is looking at. But what if we want to trade based on, say, streaming Twitter data? Flashbot allows you to setup custom data sources to do exactly this.
+
+1. Extend the `DataIngestService`
 
 ## Java Library
 - `io.flashbook.flashbot.client.Client` for connecting to a running Flashbot server
