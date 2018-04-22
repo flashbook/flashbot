@@ -1,0 +1,5 @@
+package collectors
+
+class RelevantTweetsCollector {
+
+}

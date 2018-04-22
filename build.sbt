@@ -6,6 +6,13 @@ lazy val sharedSettings = Seq(
   scalaVersion := "2.11.8"
 )
 
+// Hack to stop SBT from complaining
+// https://github.com/sbt/sbt/issues/3618
+val workaround = {
+  sys.props += ("packaging.type" -> "jar")
+  ()
+}
+
 lazy val akkaVersion = "2.5.11"
 lazy val akkaHttpVersion = "10.1.0"
 lazy val circeVersion = "0.9.0"
@@ -48,7 +55,7 @@ lazy val jsonDeps = List(
 )
 
 lazy val dataStores = List(
-  "net.openhft" % "chronicle-queue" % "4.6.73",
+  "net.openhft" % "chronicle-queue" % "4.6.99",
   "net.openhft" % "chronicle-map" % "3.14.5"
 )
 
@@ -61,14 +68,25 @@ lazy val serviceDeps = List(
   "io.prometheus" % "simpleclient_httpserver" % "0.3.0"
 )
 
-lazy val server = project
-  .in(file("server"))
+lazy val marketDataDeps = List(
+  "info.bitrich.xchange-stream" % "xchange-stream-core" % "4.3.2" % Compile,
+  "info.bitrich.xchange-stream" % "xchange-gdax" % "4.3.2" % Compile
+)
+
+lazy val root = project.in(file("."))
   .settings(sharedSettings: _*)
-  .settings(name := "flashbot-server")
   .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-    dataStores ++ testDeps))
-  .dependsOn(common)
-  .aggregate(common)
+    marketDataDeps ++ dataStores ++ testDeps))
+
+//lazy val server = project
+//  .in(file("server"))
+//  .settings(sharedSettings: _*)
+//  .settings(name := "flashbot-server")
+//  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
+//    dataStores ++ testDeps))
+//  .dependsOn(common)
+//  .aggregate(common)
+//
 
 //lazy val ui = project
 //  .in(file("ui"))
@@ -84,16 +102,12 @@ lazy val server = project
 //  .dependsOn(common)
 //  .aggregate(common)
 
-lazy val common = project
-  .in(file("common"))
-  .settings(sharedSettings: _*)
-  .settings(name := "flashbot-common")
-  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-    dataStores ++ testDeps))
-
-lazy val root = project.in(file("."))
-    .settings(sharedSettings: _*)
-    .aggregate(server)
+//lazy val common = project
+//  .in(file("common"))
+//  .settings(sharedSettings: _*)
+//  .settings(name := "flashbot-common")
+//  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
+//    dataStores ++ testDeps))
 
 //lazy val root = project.in(file("."))
 //    .aggregate(doomsdayJS, doomsdayJVM)

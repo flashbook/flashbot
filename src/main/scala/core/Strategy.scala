@@ -1,0 +1,5 @@
+package core
+
+trait Strategy {
+
+}
