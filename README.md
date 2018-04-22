@@ -9,11 +9,14 @@ To run Flashbot, all you need to do is download the latest `flashbot.jar` from t
 
 Get started by trying some of the [tutorials](https://github.com/flashbook/flashbot#tutorials) or run with the `--help` option to see usage info.
 ```bash
-$ java -jar flashbot.jar
+$ java -jar flashbot.jar --help
 ```
 
+Looking for the Java client library, or just want programmatic access to the server? Jump to the [Java Library](https://github.com/flashbook/flashbot#java-library) section to see how to integrate with the various JVM build tools.
+
 ### Java Library
-Use the Java library to run a Flashbot `Server` instance directly, or to use the Flashbot client library to connect to a (possibly remote) Flashbot server.
+- `io.flashbook.flashbot.client.Client` for connecting to a running Flashbot server
+- `io.flashbook.flashbot.ingest.IngestService` for ingesting data
 
 #### Maven
 1. Add the JitPack repository to pom.xml
