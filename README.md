@@ -32,8 +32,8 @@ The server processes market data as it's being ingested and provides all kinds o
 
 Visit `http://localhost:9020/graphiql` in a browser to interactively explore and query the Flashbot GraphQL API.
 
-### Connect from Java or Python
-We can use the Flashbot Python client library and a Jupyter notebook to start exporing our data.
+### Connect via the client
+Here we'll use the Flashbot Java client library to start exporing our data. If you're using Python, you can skip to the [Python and Jupyter](https://github.com/flashbook/flashbot#python-and-jupyter) section.
 
 1. Start a Flashbot server, if not already running.
     ```bash
@@ -45,7 +45,7 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
 
     **Java**
     
-    Follow the instructions at [Java Library](https://github.com/flashbook/flashbot#java-library)
+    Follow the [Java Library](https://github.com/flashbook/flashbot#java-library) instructions to get the Java client.
     
     **Python**
     
@@ -55,7 +55,7 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
 
 3. Query the Flashbot server for some market data, in this case, we request an aggregated order book and look up the price of the best ask.
 
-    a. Java
+    **Java**
     
     ```java
     import io.flashbook.flashbot.client.Client;
@@ -64,13 +64,13 @@ We can use the Flashbot Python client library and a Jupyter notebook to start ex
     Double bestAsk = client.orderBook('gdax', 50).asks.get(0).price;
     ```
     
-    b. Python
+    **Python**
     
     ```python
     from flashbot import Client
  
     client = Client(9020)
-    best_ask = client.order_book('gdax', 50).asks.get(0).price
+    best_ask = client.order_book('gdax', 50).asks[0]['price']
     ```
 
 ### Run and optimize a sample strategy
@@ -81,7 +81,9 @@ import io.flashbook.flashbot.server.Server;
 import io.flashbook.flashbot.client.Client;
 
 Client fb = new Client(9020);
-fb.createBot("io.flashbook.flashbot.strategies.MovingAverageCrossover");
+fb.newBot("io.flashbook.flashbot.strategies.MovingAverageCrossover");
+
+
 ```
 
 ###
