@@ -12,9 +12,54 @@ Get started by trying some of the [tutorials](https://github.com/flashbook/flash
 $ java -jar flashbot.jar --help
 ```
 
-Looking for the Java client library, or just want programmatic access to the server? Jump to the [Java Library](https://github.com/flashbook/flashbot#java-library) section to see how to integrate with the various JVM build tools.
+Looking for the Java client library, or just want to run the server manually? Jump to the [Java Library](https://github.com/flashbook/flashbot#java-library) section to see how to integrate with the various JVM build tools.
 
-### Java Library
+## Tutorials
+
+### Ingest market data
+Let's start with the built-in GDAX market data for now. This connects to the GDAX REST and WebSocket APIs and saves order book data to disk in real time. Leave the following command running in a shell.
+```bash
+# Run with --help to see all options
+$ java -jar flashbot.jar ingest --exchanges=gdax --dataDir=/my/data/dir
+```
+
+### Start a Flashbot server
+In another shell, we'll run the jar with the `server` command and point it at the directory we're ingesting to.
+```bash
+$ java -jar flashbot.jar server --dataDir=/my/data/dir
+```
+
+The server processes market data as it's being ingested and provides all kinds of interesting data and aggregations via a GraphQL endpoint.
+
+Visit `http://localhost:9020/graphiql` to interactively explore and query the Flashbot GraphQL API.
+
+### Connect from Java or Python
+We can use the Flashbot Python client library and a Jupyter notebook to start exporing our data.
+
+1. First, run a Flashbot server in a new shell. This is what our Flashbot client will connect to.
+    ```bash
+    # Starts a Flashbot server on the default port (9020)
+    $ java -jar flashbot.jar server --exchanges=gdax --dataDir=/my/data/dir
+    ```
+
+2. Open
+
+### Run a sample strategy
+Now that we have a streaming source of market data in our `--dataDir` directory, we can run strategies on it. A strategy is identified by a fully qualified Java class name.
+
+```java
+import io.flashbook.flashbot.server.Server;
+import io.flashbook.flashbot.client.Client;
+import io.flashbook.flashbot.client.Config;
+
+// Create an in-memory server for testing
+Server server = new Server();
+Client client = new Client(server);
+
+client.run()
+```
+
+## Java Library
 - `io.flashbook.flashbot.client.Client` for connecting to a running Flashbot server
 - `io.flashbook.flashbot.ingest.IngestService` for ingesting data
 
@@ -65,27 +110,3 @@ Looking for the Java client library, or just want programmatic access to the ser
     libraryDependencies += "com.github.flashbook" % "flashbot" % "0.1.1"
     ```
 
-## Tutorials
-
-### Start collecting data
-Let's start with the built-in GDAX market data for now. This connects to the GDAX REST and WebSocket APIs and saves order book data to disk in real time. Leave the following command running in a shell.
-```bash
-$ java -jar flashbot.jar collect --keys=gdax --dataDir=/my/data/dir
-```
-
-
-
-### Run a sample strategy
-Now that we have a streaming source of market data in our `--dataDir` directory, we can run strategies on it. A strategy is identified by a fully qualified Java class name.
-
-```java
-import io.flashbook.flashbot.server.Server;
-import io.flashbook.flashbot.client.Client;
-import io.flashbook.flashbot.client.Config;
-
-// Create an in-memory server for testing
-Server server = new Server();
-Client client = new Client(server);
-
-client.run()
-```
