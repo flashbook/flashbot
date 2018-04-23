@@ -3,7 +3,7 @@
 Flashbot is a program for developing and running high-frequency Cryptocurrency trading systems. You can connect to it from Java, Python, Jupyter, and any other clients that speaks GraphQL.
 
 ## Docs
-[Flashbot Wiki](https://github.com/flashbook/flashbot/wiki) - has a series of tutorials that take you from an empty Flashbot installation to running a profitable strategy on GDAX.
+The [Flashbot Wiki](https://github.com/flashbook/flashbot/wiki) hosts the docs, as well as a series of tutorials you from an empty Flashbot installation to running a profitable strategy live on GDAX.
 
 TODO: Link
 [JavaDoc]()
