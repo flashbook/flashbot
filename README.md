@@ -79,49 +79,23 @@ Our sample bot is currently looking at only historical order book data to make d
 - `io.flashbook.flashbot.ingest.IngestService` for ingesting data
 
 #### Maven
-1. Add the JitPack repository to pom.xml
-    ```xml
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-    ```
-
-2. Add the dependency to pom.xml
-    ```xml
-    <dependency>
-        <groupId>com.github.flashbook</groupId>
-        <artifactId>flashbot</artifactId>
-        <version>0.1.1</version>
-    </dependency>
-    ```
+```xml
+<dependency>
+    <groupId>io.flashbook</groupId>
+    <artifactId>flashbot</artifactId>
+    <version>0.1.1</version>
+</dependency>
+```
 
 #### Gradle
-1. Add the JitPack repository to build.gradle
-    ```
-    allprojects {
-        repositories {
-            ...
-            maven { url 'https://jitpack.io' }
-        }
-    }
-    ```
-    
-2. Add the dependency to build.gradle
-    ```
-    dependencies {
-        compile 'com.github.flashbook:flashbot:0.1.1'
-    }
-    ```
+```
+dependencies {
+    compile 'io.flashbook:flashbot:0.1.1'
+}
+```
 
 #### SBT
-1. Add the JitPack repository to the end of resolvers in build.sbt
-    ```
-    resolvers += "jitpack" at "https://jitpack.io"
-    ```
-    
-2. Add the dependency to build.sbt
-    ```
-    libraryDependencies += "com.github.flashbook" % "flashbot" % "0.1.1"
-    ```
+```
+libraryDependencies += "io.flashbook" % "flashbot" % "0.1.1"
+```
 
