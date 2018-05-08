@@ -1,5 +1,0 @@
-package collectors
-
-class RelevantTweetsCollector {
-
-}

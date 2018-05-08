@@ -1,8 +1,23 @@
 # Flashbot
 
-Flashbot is a program for developing and running high-frequency Cryptocurrency trading systems.
+Flashbot is an open-source program for building, testing, and deploying Cryptocurrency trading strategies. Here are some of the main featues:
 
-You can connect to it from Java, Python, or any client that speaks GraphQL.
+* Collect market data from supported exchanges
+* Develop strategies based on powerful indicators
+  * MACD, EMA, SMA, RSI, Simple Linear Regression, Covariance, and over 120 more
+* Backtest strategies on past data (trading fees accurately calculated)
+* Query market data and analyze performance with Python/Jupyter
+* Support for additional data sources (such as Twitter volume/sentiment analysis)
+* Manage bots through a web UI
+
+You can also get the following additional features with Flashbot Pro:
+
+* High frequency trading
+  * Strategies have access to the full order book
+  * Replay the order book to any point in time to debug your trades
+  * Simulate latency during backtesting
+* Walk-forward strategy auto-optimization
+* Optionally deploy strategies through our cloud service Flashbook.io
 
 ## Install
 To run Flashbot, download the latest `flashbot.jar` from the [releases](https://github.com/flashbook/flashbot/releases) page.
@@ -12,7 +27,38 @@ Get started by trying some of the [tutorials](https://github.com/flashbook/flash
 $ java -jar flashbot.jar --help
 ```
 
-Looking for the Java client library, or just want to run the server manually? Jump to the [Java Library](https://github.com/flashbook/flashbot#java-library) section to see how to integrate with the various JVM build tools.
+## Ops
+### Grafana
+### Logs
+### Miner
+
+## Java Client Library
+
+#### Maven
+
+Add the dependency to pom.xml
+```xml
+<dependency>
+    <groupId>com.github.flashbook</groupId>
+    <artifactId>flashbot</artifactId>
+    <version>0.1.1</version>
+</dependency>
+```
+
+#### Gradle
+Add the dependency to build.gradle
+```
+dependencies {
+    compile 'com.github.flashbook:flashbot:0.1.1'
+}
+```
+
+#### SBT
+Add the dependency to build.sbt
+```
+libraryDependencies += "com.github.flashbook" % "flashbot" % "0.1.1"
+```
+
 
 ## Tutorials
 
@@ -73,55 +119,3 @@ fb.newBot("io.flashbook.flashbot.strategies.MovingAverageCrossover");
 Our sample bot is currently looking at only historical order book data to make decisions. i.e. what everyone else is looking at. But what if we want to trade based on, say, streaming Twitter data? Flashbot allows you to setup custom data sources to do exactly this.
 
 1. Extend the `DataIngestService`
-
-## Java Library
-- `io.flashbook.flashbot.client.Client` for connecting to a running Flashbot server
-- `io.flashbook.flashbot.ingest.IngestService` for ingesting data
-
-#### Maven
-1. Add the JitPack repository to pom.xml
-    ```xml
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-    ```
-
-2. Add the dependency to pom.xml
-    ```xml
-    <dependency>
-        <groupId>com.github.flashbook</groupId>
-        <artifactId>flashbot</artifactId>
-        <version>0.1.1</version>
-    </dependency>
-    ```
-
-#### Gradle
-1. Add the JitPack repository to build.gradle
-    ```
-    allprojects {
-        repositories {
-            ...
-            maven { url 'https://jitpack.io' }
-        }
-    }
-    ```
-    
-2. Add the dependency to build.gradle
-    ```
-    dependencies {
-        compile 'com.github.flashbook:flashbot:0.1.1'
-    }
-    ```
-
-#### SBT
-1. Add the JitPack repository to the end of resolvers in build.sbt
-    ```
-    resolvers += "jitpack" at "https://jitpack.io"
-    ```
-    
-2. Add the dependency to build.sbt
-    ```
-    libraryDependencies += "com.github.flashbook" % "flashbot" % "0.1.1"
-    ```
-

@@ -3,7 +3,8 @@ lazy val sharedSettings = Seq(
   name := "flashbot",
   organization := "io.flashbook",
   version := "0.1-SNAPSHOT",
-  scalaVersion := "2.11.8"
+  scalaVersion := "2.11.8",
+  resolvers += Resolver.sonatypeRepo("snapshots")
 )
 
 // Hack to stop SBT from complaining
@@ -59,7 +60,6 @@ lazy val dataStores = List(
   "net.openhft" % "chronicle-map" % "3.14.5"
 )
 
-
 lazy val serviceDeps = List(
   "com.github.scopt" % "scopt_2.11" % "3.7.0",
   "com.typesafe" % "config" % "1.3.2" % Compile,
@@ -73,10 +73,19 @@ lazy val marketDataDeps = List(
   "info.bitrich.xchange-stream" % "xchange-gdax" % "4.3.2" % Compile
 )
 
+lazy val timeSeriesDeps = List(
+  "org.ta4j" % "ta4j-core" % "0.12-SNAPSHOT"
+)
+
+lazy val miscDeps = List(
+  // Reflection utility for discovering classes that implement an interface.
+  "org.clapper" %% "classutil" % "1.1.2"
+)
+
 lazy val root = project.in(file("."))
   .settings(sharedSettings: _*)
   .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-    marketDataDeps ++ dataStores ++ testDeps))
+    marketDataDeps ++ dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
 
 //lazy val server = project
 //  .in(file("server"))

@@ -1,0 +1,90 @@
+{
+  "exchanges": {
+    "gdax": {
+      "class": "io.flashbook.exchanges.GDAX"
+    },
+    "binance": {
+      "class": "io.flashbook.exchanges.Binance"
+    },
+    "bitmex": {
+      "class": "io.flashbook.exchanges.BitMEX"
+    }
+  },
+
+  "data_sources": {
+    "gdax": {
+      "class": "io.flashbook.data.GDAXMarketDataSource",
+      "topics": {
+        "btc_usd": {},
+        "ltc_usd": {},
+        "eth_usd": {},
+        "eth_btc": {},
+        "ltc_btc": {}
+      },
+      "data_types": {
+        "trades": {
+          "retention": "30d"
+        }
+      }
+    },
+
+    "binance": {
+      "class": "io.flashbook.data.BinanceMarketDataSource",
+      "topics": {
+        "btc_usdt": {},
+        "ltc_usdt": {},
+        "eth_usdt": {},
+        "eth_btc": {},
+        "ltc_btc": {},
+        "ltc_eth": {}
+      },
+      "data_types": {
+        "trades": {
+          "retention": "30d"
+        }
+      }
+    },
+
+    "twitter": {
+      "class": "io.flashbook.data.TwitterSearchDataSource",
+      "topics": {
+        "btc": {
+          "search_terms": ["btc", "#btc", "bitcoin", "#bitcoin", "$btc"]
+        },
+        "eth": {
+          "search_terms": ["eth", "#eth", "ether", "#ether", "ethereum", "#ethereum", "$eth"]
+        },
+        "ltc": {
+          "search_terms": ["ltc", "#ltc", "litecoin", "#litecoin", "$ltc"]
+        }
+      },
+      "data_types": {
+        "tweets": {
+          "retention": "30d"
+        }
+      }
+    }
+  },
+
+  "strategies": {
+    "dmac": "io.flashbook.strategies.DualMovingAverageCrossover",
+    "signal": "io.flashbook.strategies.ExternalSignal",
+    "latency_arb": "io.flashbook.strategies.LatencyArbitrage",
+    "twitter_vol": "io.flashbook.strategies.TwitterVolumeTrader"
+  }
+
+//  "collections": {
+//    "gdax/btc_usd": {},
+//    "gdax/ltc_usd": {},
+//    "gdax/eth_usd": {},
+//    "binance/btc_usdt": {},
+//    "binance/ltc_usdt": {},
+//    "binance/eth_usdt": {},
+//    "binance/eth_btc": {},
+//    "binance/ltc_btc": {},
+//    "binance/ltc_eth": {},
+//    "twitter/btc": {},
+//    "twitter/eth": {},
+//    "twitter/ltc": {}
+//  }
+}
