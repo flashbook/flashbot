@@ -25,8 +25,7 @@ import scala.util.{Failure, Success}
 package object api {
   implicit val schema: Schema[FlashbotCtx, Unit] = GraphQLSchema.build()
 
-  def routes(strategies: Map[String, Strategy],
-             engine: ActorRef)
+  def routes(engine: ActorRef)
             (implicit system: ActorSystem,
              mat: Materializer,
              ec: ExecutionContext): Route = cors() {

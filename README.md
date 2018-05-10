@@ -34,7 +34,7 @@ Add the dependency to pom.xml
 
 #### Gradle
 Add the dependency to build.gradle
-```
+```groovy
 dependencies {
     compile 'com.github.flashbook:flashbot:0.1.1'
 }
@@ -42,7 +42,7 @@ dependencies {
 
 #### SBT
 Add the dependency to build.sbt
-```
+```groovy
 libraryDependencies += "com.github.flashbook" % "flashbot" % "0.1.1"
 ```
 

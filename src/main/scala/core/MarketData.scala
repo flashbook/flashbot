@@ -26,5 +26,4 @@ trait MarketData {
 }
 
 object MarketData {
-  def address(md: MarketData): String = s"${md.source}/${md.topic}/${md.dataType}"
 }

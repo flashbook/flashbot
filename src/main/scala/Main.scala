@@ -4,9 +4,7 @@ import java.io.File
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
-import core.DataSource
-import data.GdaxMarketDataSource
-import io.circe.DecodingFailure
+import core.{DataSource, TradingEngine}
 import io.prometheus.client.exporter.HTTPServer
 
 import scala.concurrent.ExecutionContext
@@ -97,8 +95,11 @@ object Main {
         })
 
       case "trade" =>
-        val engine = system.actorOf(Props[core.TradingEngine], "trading-engine")
-        Http().bindAndHandle(api.routes(Map.empty, engine), "localhost", 9020)
+        val engine = system.actorOf(
+          Props(new TradingEngine(
+            config.strategies, config.data_sources.mapValues(_.`class`))),
+          "trading-engine")
+        Http().bindAndHandle(api.routes(engine), "localhost", 9020)
     }
 
   }

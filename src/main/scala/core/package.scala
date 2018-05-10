@@ -9,6 +9,7 @@ package object core {
 
   case class BarSize(size: Int, unit: BarUnit)
 
+  // nanos
   case class TimeRange(from: Long, to: Long)
 
   case class Pair(base: String, quote: String) {

@@ -12,9 +12,9 @@ abstract class DataSource(val dataPath: String) {
 
   def index(topic: String, dataType: String): Seq[TimeRange]
 
-  def stream[T <: MarketData](topic: String,
-                              dataType: String,
-                              period: TimeRange): Source[T, NotUsed]
+  def stream(topic: String,
+             dataType: String,
+             timeRange: TimeRange): Source[MarketData, NotUsed]
 }
 
 object DataSource {
@@ -23,4 +23,13 @@ object DataSource {
   final case class DataSourceConfig(`class`: String,
                                     topics: Map[String, Json],
                                     data_types: Map[String, DataTypeConfig])
+
+  final case class Address(srcKey: String, topic: String, dataType: String) {
+    override def toString: String = List(srcKey, topic, dataType).mkString("/")
+  }
+
+  def parseAddress(addr: String): Address = addr.split("/") match {
+    case (srcKey: String) :: (topic: String) :: (dataType: String) :: Nil =>
+      Address(srcKey, topic, dataType)
+  }
 }

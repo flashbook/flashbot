@@ -7,7 +7,7 @@ import core.{MarketData, Strategy, TradingSession}
   * orders on an exchange as quickly as possible.
   */
 class ExternalSignal extends Strategy {
-  override def name: String = "External Signal"
+  override def title: String = "External Signal"
 
   override def initialize(implicit ctx: TradingSession): Unit = ???
 

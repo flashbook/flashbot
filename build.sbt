@@ -1,4 +1,3 @@
-
 lazy val sharedSettings = Seq(
   name := "flashbot",
   organization := "io.flashbook",
@@ -6,13 +5,6 @@ lazy val sharedSettings = Seq(
   scalaVersion := "2.11.8",
   resolvers += Resolver.sonatypeRepo("snapshots")
 )
-
-// Hack to stop SBT from complaining
-// https://github.com/sbt/sbt/issues/3618
-val workaround = {
-  sys.props += ("packaging.type" -> "jar")
-  ()
-}
 
 lazy val akkaVersion = "2.5.11"
 lazy val akkaHttpVersion = "10.1.0"
@@ -68,11 +60,6 @@ lazy val serviceDeps = List(
   "io.prometheus" % "simpleclient_httpserver" % "0.3.0"
 )
 
-lazy val marketDataDeps = List(
-  "info.bitrich.xchange-stream" % "xchange-stream-core" % "4.3.2" % Compile,
-  "info.bitrich.xchange-stream" % "xchange-gdax" % "4.3.2" % Compile
-)
-
 lazy val timeSeriesDeps = List(
   "org.ta4j" % "ta4j-core" % "0.12-SNAPSHOT"
 )
@@ -85,7 +72,30 @@ lazy val miscDeps = List(
 lazy val root = project.in(file("."))
   .settings(sharedSettings: _*)
   .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-    marketDataDeps ++ dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
+    dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
+
+
+
+// Hack to stop SBT from complaining
+// https://github.com/sbt/sbt/issues/3618
+// Relevant to the jax rs ws dependency of xchange libraries
+// All that mess is commented out for now anyway
+//
+//val workaround = {
+//  sys.props += ("packaging.type" -> "jar")
+//  ()
+//}
+//lazy val marketDataDeps = List(
+//  "info.bitrich.xchange-stream" % "xchange-stream-core" % "4.3.2" % Compile,
+//  "info.bitrich.xchange-stream" % "xchange-gdax" % "4.3.2" % Compile
+//)
+
+
+
+
+
+
+
 
 //lazy val server = project
 //  .in(file("server"))

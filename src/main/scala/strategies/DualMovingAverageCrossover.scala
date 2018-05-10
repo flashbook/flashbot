@@ -8,10 +8,13 @@ import io.circe.Json
 import org.ta4j.core.{BaseTimeSeries, TimeSeries}
 
 /**
-  * This is an example of how to build a trading strategy based on common technical indicators.
+  * This is an example of how to build a trading strategy based on common technical indicators
+  * from the Ta4j library.
   */
 class DualMovingAverageCrossover extends PureStrategy {
   import io.circe.generic.auto._
+
+  override val title = "Dual Moving Average Crossover"
 
   case class Params(exchange: String,
                     market: Pair,
@@ -21,8 +24,6 @@ class DualMovingAverageCrossover extends PureStrategy {
 
   var _params: Option[Params] = None
   def params: Params = _params.get
-
-  override val name = "Dual Moving Average Crossover"
 
   val prices: TimeSeries =
     new BaseTimeSeries.SeriesBuilder().withName(s"${params.market}_prices").build()

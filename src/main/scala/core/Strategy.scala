@@ -10,7 +10,10 @@ import io.circe.Json
   * possibly written in other languages.
   */
 trait Strategy {
-  def name: String
+  /**
+    * Human readable title for display purposes.
+    */
+  def title: String
 
   /**
     * During initialization, strategies declare what data sources they need by name, all of which
