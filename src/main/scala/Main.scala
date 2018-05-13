@@ -97,7 +97,9 @@ object Main {
       case "trade" =>
         val engine = system.actorOf(
           Props(new TradingEngine(
-            config.strategies, config.data_sources.mapValues(_.`class`))),
+            config.strategies,
+            config.data_sources.mapValues(_.`class`),
+            config.exchanges.mapValues(_.`class`))),
           "trading-engine")
         Http().bindAndHandle(api.routes(engine), "localhost", 9020)
     }

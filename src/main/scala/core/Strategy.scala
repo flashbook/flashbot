@@ -1,6 +1,7 @@
 package core
 
 import io.circe.Json
+import Strategy._
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -9,7 +10,7 @@ import io.circe.Json
   * This design is intended to make it easier for us to support remote strategies in the future,
   * possibly written in other languages.
   */
-trait Strategy {
+abstract class Strategy {
   /**
     * Human readable title for display purposes.
     */
@@ -28,18 +29,15 @@ trait Strategy {
     * Receives streaming streaming market data from the sources declared during initialization.
     */
   def handleData(data: MarketData)(implicit ctx: TradingSession)
+
+  def orderTargetRatio(target: Ratio)(implicit ctx: TradingSession): Unit = {
+  }
+
+  def orderTargetRatio(target: Ratio, price: Double, name: String = "limit")
+                      (implicit ctx: TradingSession): Unit = {
+  }
 }
 
 object Strategy {
   final case class StrategyConfig()
-
-  abstract class PureStrategy extends Strategy {
-    protected def orderTargetPercent(target: Double)(implicit ctx: TradingSession): Unit = {
-    }
-  }
-
-  abstract class BaseStrategy extends PureStrategy {
-    override def orderTargetPercent(target: Double)(implicit ctx: TradingSession): Unit =
-      super.orderTargetPercent(target)
-  }
 }

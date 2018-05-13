@@ -1,23 +1,43 @@
 package core
 
+import core.Order.Side
+
 object TradingSession {
   trait Event
+  case class LogMessage(message: String) extends Event
+  case class OrderTarget(exchangeName: String, ratio: Ratio, pair: Pair,
+                         price: Option[(String, Double)]) extends Event {
+    def id: String = (exchangeName :: pair ::
+      price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
+  }
 
-  case class SessionState(seqNr: Long = 0)
+  trait Action
+  trait OrderAction extends Action
+  case class PostMarketOrder(id: String, targetId: String, pair: Pair, side: Side,
+                             percent: Percent) extends OrderAction
+  case class PostLimitOrder(id: String, targetId: String, pair: Pair, side: Side,
+                            percent: Percent, price: Double) extends OrderAction
+  case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends OrderAction
+
+//  trait OrderStatus
+//  case class OrderState(order: Order, status: OrderStatus)
+
+  case class SessionState(seqNr: Long = 0,
+                          // orders: Map[String, OrderState] = Map.empty,
+                          balances: Map[Account, Double] = Map.empty)
+
+  trait Mode
+  case class Backtest(range: TimeRange) extends Mode
+  case object Paper extends Mode
+  case object Live extends Mode
 }
 
-/**
-  * TradingSession contains an instance of a running strategy and processes the events emitted
-  * by it.
-  */
 trait TradingSession {
   import TradingSession._
 
   def id: String
-  def timeRange: TimeRange
+  def exchanges: Map[String, Exchange]
   def state: SessionState
-  def handleEvent(event: Event): Unit
+
+  def handleEvents(events: Event*): Unit
 }
-//abstract case class TradingSession(timeRange: TimeRange, state: TradingSession.SessionState) {
-//  def handleEvent(event: TradingSession.Event)
-//}

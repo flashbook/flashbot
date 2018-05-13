@@ -26,4 +26,5 @@ trait MarketData {
 }
 
 object MarketData {
+  implicit val ordering: Ordering[MarketData] = Ordering.by(_.timestamp)
 }

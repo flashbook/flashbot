@@ -71,20 +71,26 @@
     "signal": "io.flashbook.strategies.ExternalSignal",
     "latency_arb": "io.flashbook.strategies.LatencyArbitrage",
     "twitter_vol": "io.flashbook.strategies.TwitterVolumeTrader"
-  }
+  },
 
-//  "collections": {
-//    "gdax/btc_usd": {},
-//    "gdax/ltc_usd": {},
-//    "gdax/eth_usd": {},
-//    "binance/btc_usdt": {},
-//    "binance/ltc_usdt": {},
-//    "binance/eth_usdt": {},
-//    "binance/eth_btc": {},
-//    "binance/ltc_btc": {},
-//    "binance/ltc_eth": {},
-//    "twitter/btc": {},
-//    "twitter/eth": {},
-//    "twitter/ltc": {}
-//  }
+  "currencies": {
+    "usd": {
+      "name": "US Dollars"
+    },
+    "btc": {
+      "name": "Bitcoin"
+    },
+    "xbt": {
+      "alias": "btc"
+    },
+    "eth": {
+      "name": "Ethereum"
+    },
+    "ltc": {
+      "name": "Litecoin"
+    },
+    "usdt": {
+      "name": "Tether"
+    }
+  }
 }
