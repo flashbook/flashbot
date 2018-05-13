@@ -195,6 +195,12 @@ class TradingEngine(strategyClassNames: Map[String, String],
         */
       class SessionActor extends Actor {
         var session: Session = Session()
+        var actions: ActionQueue = ActionQueue()
+
+        trait ActionResponse
+        case object Ok extends ActionResponse
+        // TODO: Add more specific failures and handle them (such as rate limit retries)
+        case object Fail extends ActionResponse
 
         override def receive: Receive = {
           case action: Action => action match {
@@ -219,6 +225,24 @@ class TradingEngine(strategyClassNames: Map[String, String],
             session = session.setState(state => state.copy(
               seqNr = state.seqNr + 1
             ))
+
+          case rsp: ActionResponse => rsp match {
+            case Ok =>
+              touch()
+            case Fail =>
+              // TODO: This error should stop the show. Does it? I don't think it does currently.
+              throw EngineError("Error processing action. Exiting.")
+          }
+        }
+
+        // Keep the actions flowing
+        def touch(): Unit = {
+          actions match {
+            case ActionQueue(None, next +: rest) =>
+              // If there's an action queued up and no active action, activate the next one.
+            case _ =>
+              // Otherwise, nothing to do here.
+          }
         }
       }
 
@@ -318,13 +342,10 @@ object TradingEngine {
     def update(event: Event): EngineState = ???
   }
 
-  case class ActionQueue(active: Option[Action], queue: Queue[Action]) {
+  case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
     def enqueue(action: Action): ActionQueue = copy(queue = queue.enqueue(action))
     def closeActive: ActionQueue = active match {
       case Some(_) => copy(active = None)
     }
-  }
-  object ActionQueue {
-    def empty: ActionQueue = ActionQueue(None, Queue.empty)
   }
 }
