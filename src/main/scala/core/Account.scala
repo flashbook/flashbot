@@ -1,7 +1,3 @@
 package core
 
-import akka.stream.scaladsl.Balance
-
-case class Account(address: Option[String],
-                   currency: String,
-                   exchange: String)
+case class Account(currency: String, exchange: String)

@@ -1,7 +1,5 @@
 package core
 
-import core.Order.Side
-
 object TradingSession {
   trait Event
   case class LogMessage(message: String) extends Event
@@ -11,11 +9,11 @@ object TradingSession {
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
 
-//  trait OrderStatus
+  trait OrderStatus
 //  case class OrderState(order: Order, status: OrderStatus)
 
   case class SessionState(seqNr: Long = 0,
-                          // orders: Map[String, OrderState] = Map.empty,
+                          orders: Map[String, OrderStatus] = Map.empty,
                           balances: Map[Account, Double] = Map.empty)
 
   trait Mode

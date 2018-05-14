@@ -237,7 +237,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
               touch()
             case Fail =>
               // TODO: This error should stop the show. Does it? I don't think it does currently.
-              throw EngineError("Error processing action. Exiting.")
+              throw EngineError("Action error")
           }
         }
 
