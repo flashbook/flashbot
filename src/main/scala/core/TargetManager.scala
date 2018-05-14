@@ -2,6 +2,7 @@ package core
 
 import java.util.UUID.randomUUID
 
+import core.Action.{CancelLimitOrder, OrderAction, PostLimitOrder, PostMarketOrder}
 import core.Order.{Buy, Sell}
 import core.TradingSession._
 

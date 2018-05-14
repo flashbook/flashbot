@@ -5,12 +5,11 @@ import akka.persistence._
 import io.circe.Json
 import java.util.UUID
 
-import akka.stream.scaladsl.{Merge, MergeSorted, Sink, Source}
 import TradingSession._
-import akka.stream.OverflowStrategy
+import core.Transaction.TradeTx
+import core.Action._
 
-import scala.collection.immutable.Queue
-import scala.concurrent.Future
+import scala.util.{Failure, Success}
 
 /**
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
@@ -154,6 +153,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
       var currentStrategySeqNr: Option[Long] = None
       val sessionActor = context.actorOf(Props[SessionActor], "session")
       val targetManager = new TargetManager
+      val oms = new OrderManager
 
       /**
         * The trading session that we fold market data over. We pass the running session instance
@@ -195,24 +195,29 @@ class TradingEngine(strategyClassNames: Map[String, String],
         */
       class SessionActor extends Actor {
         var session: Session = Session()
+        // TODO: All actions per strategy are executed sequentially. We may want to allow
+        // concurrent actions if they are from different exchanges. May be helpful for
+        // inter-exchange strategies where latency matters.
         var actions: ActionQueue = ActionQueue()
 
-        trait ActionResponse
-        case object Ok extends ActionResponse
-        // TODO: Add more specific failures and handle them (such as rate limit retries)
-        case object Fail extends ActionResponse
-
         override def receive: Receive = {
-          case action: Action => action match {
-            case orderAction: OrderAction => orderAction match {
-              case PostMarketOrder(id, targetId, pair, side, percent) =>
-              case PostLimitOrder(id, targetId, pair, side, percent, price) =>
-              case CancelLimitOrder(id, targetId, pair) =>
-            }
-          }
+          case action: OrderAction =>
+            actions = actions.enqueue(action)
+            touch()
 
           case data: MarketData =>
-            // Use a sequence number to enforce the rule that Session.handleEvent is only allowed
+            var newSession = session
+
+            // Before we send market data to the strategy, we use the market data for another
+            // purpose: to update our OMS and extract transactions, if necessary. This is where
+            // we detect if our limit or market orders turned into trades. In addition to emitting
+            // transactions, sending market data to the OMS is necessary for completing action
+            // response futures during backtesting.
+            oms.step(data).foreach {
+              case TradeTx(trade) =>
+            }
+
+            // Use a sequence number to enforce the rule that Session.handleEvents is only allowed
             // to be called in the current call stack.
             currentStrategySeqNr = Some(session.state.seqNr)
 
@@ -222,12 +227,13 @@ class TradingEngine(strategyClassNames: Map[String, String],
             // Lock the handleEvent method
             currentStrategySeqNr = None
 
-            session = session.setState(state => state.copy(
+            session = newSession.setState(state => state.copy(
               seqNr = state.seqNr + 1
             ))
 
           case rsp: ActionResponse => rsp match {
             case Ok =>
+              actions = actions.closeActive
               touch()
             case Fail =>
               // TODO: This error should stop the show. Does it? I don't think it does currently.
@@ -238,8 +244,20 @@ class TradingEngine(strategyClassNames: Map[String, String],
         // Keep the actions flowing
         def touch(): Unit = {
           actions match {
-            case ActionQueue(None, next +: rest) =>
+            case ActionQueue(None, (next: OrderAction) +: rest) =>
+              // Execute the action via the OMS.
+              oms.submitAction(next) onComplete {
+                case Success(rsp) =>
+                  self ! rsp
+                case Failure(err) =>
+                  // System/network errors with the actual request will surface here.
+                  // TODO: Same as above, make sure this exits the session.
+                  throw EngineError("Network error", err)
+              }
+
               // If there's an action queued up and no active action, activate the next one.
+              actions = ActionQueue(Some(next), rest)
+
             case _ =>
               // Otherwise, nothing to do here.
           }
@@ -340,12 +358,5 @@ object TradingEngine {
       * engine. No side effects please!
       */
     def update(event: Event): EngineState = ???
-  }
-
-  case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
-    def enqueue(action: Action): ActionQueue = copy(queue = queue.enqueue(action))
-    def closeActive: ActionQueue = active match {
-      case Some(_) => copy(active = None)
-    }
   }
 }

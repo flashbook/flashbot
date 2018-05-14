@@ -11,14 +11,6 @@ object TradingSession {
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
 
-  trait Action
-  trait OrderAction extends Action
-  case class PostMarketOrder(id: String, targetId: String, pair: Pair, side: Side,
-                             percent: Percent) extends OrderAction
-  case class PostLimitOrder(id: String, targetId: String, pair: Pair, side: Side,
-                            percent: Percent, price: Double) extends OrderAction
-  case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends OrderAction
-
 //  trait OrderStatus
 //  case class OrderState(order: Order, status: OrderStatus)
 
