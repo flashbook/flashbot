@@ -9,13 +9,6 @@ object TradingSession {
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
 
-  trait OrderStatus
-//  case class OrderState(order: Order, status: OrderStatus)
-
-  case class SessionState(seqNr: Long = 0,
-                          orders: Map[String, OrderStatus] = Map.empty,
-                          balances: Map[Account, Double] = Map.empty)
-
   trait Mode
   case class Backtest(range: TimeRange) extends Mode
   case object Paper extends Mode
@@ -27,7 +20,7 @@ trait TradingSession {
 
   def id: String
   def exchanges: Map[String, Exchange]
-  def state: SessionState
+//  def state: SessionState
 
   def handleEvents(events: Event*): Unit
 }

@@ -5,9 +5,16 @@ import core.Action._
 import scala.concurrent.Future
 
 
-class OrderManager {
+object OrderManager {
+  sealed trait UserData
+  case class UserTx(transaction: Transaction) extends UserData
+  case class UserOrderEvent(event: OrderEvent) extends UserData
+}
 
-  def step(data: MarketData): Seq[Transaction] = {
+class OrderManager {
+  import OrderManager._
+
+  def emitUserData(data: MarketData): Seq[UserData] = {
     List()
   }
 

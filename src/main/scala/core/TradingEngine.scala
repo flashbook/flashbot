@@ -6,8 +6,8 @@ import io.circe.Json
 import java.util.UUID
 
 import TradingSession._
-import core.Transaction.TradeTx
 import core.Action._
+import core.Order.Maker
 
 import scala.util.{Failure, Success}
 
@@ -159,7 +159,10 @@ class TradingEngine(strategyClassNames: Map[String, String],
         * The trading session that we fold market data over. We pass the running session instance
         * to the strategy every time we call `handleData`.
         */
-      case class Session(state: SessionState = SessionState()) extends TradingSession {
+      case class Session(seqNr: Long = 0,
+                         orders: Map[String, Map[Pair, Order]] = Map.empty,
+                         balances: Map[Account, Double] = Map.empty) extends TradingSession {
+
         override val id: String = sessionId
         override val exchanges: Map[String, Exchange] = _exchanges
 
@@ -168,7 +171,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
 
         def handleEvent(event: TradingSession.Event): Unit = {
           currentStrategySeqNr match {
-            case Some(seq) if seq == state.seqNr =>
+            case Some(seq) if seq == seqNr =>
               event match {
                 case target: OrderTarget =>
                   targetManager.step(target).foreach(sessionActor ! _)
@@ -183,10 +186,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
                 "was called.")
           }
         }
-
-        def setState(fn: SessionState => SessionState): Session = copy(state = fn(state))
       }
-
 
       /**
         * SessionActor processes market data as it comes in, as well as actions as they are
@@ -194,6 +194,8 @@ class TradingEngine(strategyClassNames: Map[String, String],
         * this actor is a container for.
         */
       class SessionActor extends Actor {
+        import OrderManager._
+
         var session: Session = Session()
         // TODO: All actions per strategy are executed sequentially. We may want to allow
         // concurrent actions if they are from different exchanges. May be helpful for
@@ -206,30 +208,35 @@ class TradingEngine(strategyClassNames: Map[String, String],
             touch()
 
           case data: MarketData =>
-            var newSession = session
 
-            // Before we send market data to the strategy, we use the market data for another
-            // purpose: to update our OMS and extract transactions, if necessary. This is where
-            // we detect if our limit or market orders turned into trades. In addition to emitting
-            // transactions, sending market data to the OMS is necessary for completing action
-            // response futures during backtesting.
-            oms.step(data).foreach {
-              case TradeTx(trade) =>
+            // Process user data emitted from the OrderManager.
+            val newSession = oms.emitUserData(data).foldLeft(session) {
+              case (memo, UserTx(TradeTx(id, exchange, time, makerId, takerId, price, size))) =>
+              case (memo, UserOrderEvent(event)) => event match {
+                case OrderOpen(exchange, Order(id, pair, side, amount, price)) =>
+                  memo.copy(
+                    balances = memo.balances,
+                    orders = memo.orders
+                  )
+                case OrderCanceled(id, exchange) =>
+                  memo.copy(orders = memo.orders - id)
+              }
             }
 
-            // Use a sequence number to enforce the rule that Session.handleEvents is only allowed
-            // to be called in the current call stack.
-            currentStrategySeqNr = Some(session.state.seqNr)
+            // Use a sequence number to enforce the rule that Session.handleEvents is only
+            // allowed to be called in the current call stack.
+            currentStrategySeqNr = Some(newSession.seqNr)
 
             // Send market data to strategy
-            strategy.handleData(data)(session)
+            strategy.handleData(data)(newSession)
 
             // Lock the handleEvent method
             currentStrategySeqNr = None
 
-            session = newSession.setState(state => state.copy(
-              seqNr = state.seqNr + 1
-            ))
+            // Incoming market data is the only thing that increments the session sequence number.
+            session = newSession.copy(
+              seqNr = session.seqNr + 1
+            )
 
           case rsp: ActionResponse => rsp match {
             case Ok =>
