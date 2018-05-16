@@ -20,7 +20,6 @@ trait TradingSession {
 
   def id: String
   def exchanges: Map[String, Exchange]
-//  def state: SessionState
 
   def handleEvents(events: Event*): Unit
 }

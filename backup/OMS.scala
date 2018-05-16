@@ -19,8 +19,8 @@ object OMS {
   var balances: Map[String, Double] = HashMap()
 
   // When order targets come in, they are actually serialized into a queue of order
-  // transactions per bot id.
-  var transactions: Map[String, TxQueue] = HashMap()
+  // actions per bot id.
+  var actions: Map[String, TxQueue] = HashMap()
 
   val targets: TargetManager = new TargetManager
 

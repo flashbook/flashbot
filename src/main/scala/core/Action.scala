@@ -4,7 +4,9 @@ import core.Order.Side
 
 import scala.collection.immutable.Queue
 
-trait Action
+trait Action {
+  def targetId: String
+}
 
 object Action {
   trait OrderAction extends Action
