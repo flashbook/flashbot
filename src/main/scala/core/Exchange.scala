@@ -21,16 +21,16 @@ trait Exchange {
 sealed trait OrderRequest {
   val clientOid: String
   val side: Side
-  val product: (String, String)
+  val product: Pair
 }
 final case class LimitOrderRequest(clientOid: String,
                                    side: Side,
-                                   product: (String, String),
+                                   product: Pair,
                                    price: Double,
                                    size: Double) extends OrderRequest
 final case class MarketOrderRequest(clientOid: String,
                                     side: Side,
-                                    product: (String, String),
+                                    product: Pair,
                                     size: Option[Double],
                                     funds: Option[Double]) extends OrderRequest
 

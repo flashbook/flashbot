@@ -260,7 +260,6 @@ class TradingEngine(strategyClassNames: Map[String, String],
                     acc(quote) -> (bs(acc(quote)) + (price * size * (1 - fee)))
                   )
               }
-
             case _ =>
           }
 
@@ -270,18 +269,39 @@ class TradingEngine(strategyClassNames: Map[String, String],
               tm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
           }
 
+          def pPair(exName: String, pair: Pair): PortfolioPair =
+            PortfolioPair(pair, (newBalances(Account(exName, pair.base)),
+              newBalances(Account(exName, pair.quote))),
+              if (pair.quote == "BTC") 0.00001 else 0.01)
+
           // Here is where we tell the exchange to do stuff, like place or cancel orders.
           newActions match {
             case ActionQueue(None, next +: rest) =>
               newActions = ActionQueue(Some(next), rest)
               next match {
                 case PostMarketOrder(id, targetId, pair, side, percent) =>
+                  val exName = exchangeNameForTargetId(targetId)
                   newIds = newIds.initOrder(targetId, id)
-                  session.exchanges(exchangeNameForTargetId(targetId))
-                    .order()
+                  session.exchanges(exName)
+                    .order(MarketOrderRequest(id, side, pair,
+                      if (side == Buy) None else Some(pPair(exName, pair).amount(Quote, percent)),
+                      if (side == Sell) None else Some(pPair(exName, pair).amount(Base, percent))
+                    ))
+
                 case PostLimitOrder(id, targetId, pair, side, percent, price) =>
+                  val exName = exchangeNameForTargetId(targetId)
                   newIds = newIds.initOrder(targetId, id)
+                  session.exchanges(exName)
+                    .order(LimitOrderRequest(id, side, pair,
+                      BigDecimal(price).setScale(quoteIncr(pair.quote),
+                        if (side == Buy) BigDecimal.RoundingMode.CEILING
+                        else BigDecimal.RoundingMode.FLOOR).doubleValue,
+                      pPair(exName, pair).amount(if (side == Buy) Quote else Base, percent)
+                    ))
+
                 case CancelLimitOrder(id, targetId, pair) =>
+                  session.exchanges(exchangeNameForTargetId(targetId))
+                    .cancel(ids.actualIdForTargetId(targetId))
               }
           }
 
@@ -294,100 +314,8 @@ class TradingEngine(strategyClassNames: Map[String, String],
           )
         }
         .runForeach(println)
-//        .map { case (session @ Session(_, _, balances, ids, data), targets) =>
-//          session.exchange match {
-//            case Some(exchange) =>
-//              val (fills, userEvents) = exchange.update(session)
-//            case _ =>
-//          }
-//          session
-//        }
-//        .runReduce((a, b) => b)
 
       Right(List(SessionStarted(sessionId, strategyKey, strategyParams, mode)))
-
-      /**
-        * SessionActor processes market data as it comes in, as well as actions as they are
-        * emitted from strategies. Both of these data streams interact with session state, which
-        * this actor is a container for.
-        */
-//      class SessionActor extends Actor {
-//        import OrderManager._
-//
-//        var session: Session = Session()
-//        // TODO: All actions per strategy are executed sequentially. We may want to allow
-//        // concurrent actions if they are from different exchanges. May be helpful for
-//        // inter-exchange strategies where latency matters.
-//        var actions: ActionQueue = ActionQueue()
-//
-//        override def receive: Receive = {
-//          case action: OrderAction =>
-//            actions = actions.enqueue(action)
-//            touch()
-//
-//          case data: MarketData =>
-//
-//            // Process user data emitted from the OrderManager.
-//            val newSession = oms.emitUserData(data).foldLeft(session) {
-//              case (memo, UserTx(TradeTx(id, exchange, time, makerId, takerId, price, size))) =>
-//              case (memo, UserOrderEvent(event)) => event match {
-//                case OrderOpen(exchange, Order(id, pair, side, amount, price)) =>
-//                  memo.copy(
-//                    balances = memo.balances,
-//                    orders = memo.orders
-//                  )
-//                case OrderCanceled(id, exchange) =>
-//                  memo.copy(orders = memo.orders - id)
-//              }
-//            }
-//
-//            // Use a sequence number to enforce the rule that Session.handleEvents is only
-//            // allowed to be called in the current call stack.
-//            currentStrategySeqNr = Some(newSession.seqNr)
-//
-//            // Send market data to strategy
-//            strategy.handleData(data)(newSession)
-//
-//            // Lock the handleEvent method
-//            currentStrategySeqNr = None
-//
-//            // Incoming market data is the only thing that increments the session sequence number.
-//            session = newSession.copy(
-//              seqNr = session.seqNr + 1
-//            )
-//
-//          case rsp: ActionResponse => rsp match {
-//            case Ok =>
-//              actions = actions.closeActive
-//              touch()
-//            case Fail =>
-//              // TODO: This error should stop the show. Does it? I don't think it does currently.
-//              throw EngineError("Action error")
-//          }
-//        }
-//
-//        // Keep the actions flowing
-//        def touch(): Unit = {
-//          actions match {
-//            case ActionQueue(None, (next: OrderAction) +: rest) =>
-//              // Execute the action via the OMS.
-//              oms.submitAction(next) onComplete {
-//                case Success(rsp) =>
-//                  self ! rsp
-//                case Failure(err) =>
-//                  // System/network errors with the actual request will surface here.
-//                  // TODO: Same as above, make sure this exits the session.
-//                  throw EngineError("Network error", err)
-//              }
-//
-//              // If there's an action queued up and no active action, activate the next one.
-//              actions = ActionQueue(Some(next), rest)
-//
-//            case _ =>
-//              // Otherwise, nothing to do here.
-//          }
-//        }
-//      }
   }
 
   /**
@@ -495,4 +423,109 @@ object TradingEngine {
       case _ => actions
     }
 
+  case class PortfolioPair(p: Pair, amounts: (Double, Double), incr: Double) {
+    case class CurrencyAmount(name: String, amount: Double)
+    def base: CurrencyAmount = CurrencyAmount(p.base, amounts._1)
+    def quote: CurrencyAmount = CurrencyAmount(p.quote, amounts._2)
+
+    def amount(role: PairRole, ratio: Double): Double = role match {
+      case Base => BigDecimal(base.amount * ratio)
+        .setScale(sizeIncr(base.name), BigDecimal.RoundingMode.FLOOR)
+        .toDouble
+      case Quote => BigDecimal(quote.amount * ratio)
+        .setScale(sizeIncr(quote.name), BigDecimal.RoundingMode.FLOOR)
+        .toDouble
+    }
+  }
+
+  def quoteIncr(currency: String): Int = if (currency == "BTC") 5 else 2
+  def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
+
 }
+
+
+
+
+
+/**
+  * SessionActor processes market data as it comes in, as well as actions as they are
+  * emitted from strategies. Both of these data streams interact with session state, which
+  * this actor is a container for.
+  */
+//      class SessionActor extends Actor {
+//        import OrderManager._
+//
+//        var session: Session = Session()
+//        // TODO: All actions per strategy are executed sequentially. We may want to allow
+//        // concurrent actions if they are from different exchanges. May be helpful for
+//        // inter-exchange strategies where latency matters.
+//        var actions: ActionQueue = ActionQueue()
+//
+//        override def receive: Receive = {
+//          case action: OrderAction =>
+//            actions = actions.enqueue(action)
+//            touch()
+//
+//          case data: MarketData =>
+//
+//            // Process user data emitted from the OrderManager.
+//            val newSession = oms.emitUserData(data).foldLeft(session) {
+//              case (memo, UserTx(TradeTx(id, exchange, time, makerId, takerId, price, size))) =>
+//              case (memo, UserOrderEvent(event)) => event match {
+//                case OrderOpen(exchange, Order(id, pair, side, amount, price)) =>
+//                  memo.copy(
+//                    balances = memo.balances,
+//                    orders = memo.orders
+//                  )
+//                case OrderCanceled(id, exchange) =>
+//                  memo.copy(orders = memo.orders - id)
+//              }
+//            }
+//
+//            // Use a sequence number to enforce the rule that Session.handleEvents is only
+//            // allowed to be called in the current call stack.
+//            currentStrategySeqNr = Some(newSession.seqNr)
+//
+//            // Send market data to strategy
+//            strategy.handleData(data)(newSession)
+//
+//            // Lock the handleEvent method
+//            currentStrategySeqNr = None
+//
+//            // Incoming market data is the only thing that increments the session sequence number.
+//            session = newSession.copy(
+//              seqNr = session.seqNr + 1
+//            )
+//
+//          case rsp: ActionResponse => rsp match {
+//            case Ok =>
+//              actions = actions.closeActive
+//              touch()
+//            case Fail =>
+//              // TODO: This error should stop the show. Does it? I don't think it does currently.
+//              throw EngineError("Action error")
+//          }
+//        }
+//
+//        // Keep the actions flowing
+//        def touch(): Unit = {
+//          actions match {
+//            case ActionQueue(None, (next: OrderAction) +: rest) =>
+//              // Execute the action via the OMS.
+//              oms.submitAction(next) onComplete {
+//                case Success(rsp) =>
+//                  self ! rsp
+//                case Failure(err) =>
+//                  // System/network errors with the actual request will surface here.
+//                  // TODO: Same as above, make sure this exits the session.
+//                  throw EngineError("Network error", err)
+//              }
+//
+//              // If there's an action queued up and no active action, activate the next one.
+//              actions = ActionQueue(Some(next), rest)
+//
+//            case _ =>
+//              // Otherwise, nothing to do here.
+//          }
+//        }
+//      }
