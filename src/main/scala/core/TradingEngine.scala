@@ -1,17 +1,15 @@
 package core
 
-import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props}
+import akka.actor.ActorLogging
 import akka.persistence._
 import io.circe.Json
 import java.util.UUID
 
 import TradingSession._
 import core.Action._
-import core.Order.{Buy, Fill, Maker, Sell}
+import core.Order.{Buy, Fill, Sell}
 
 import scala.collection.immutable.Queue
-import scala.concurrent.Future
-import scala.util.{Failure, Success}
 
 /**
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
@@ -415,7 +413,6 @@ object TradingEngine {
     def actualIdForTargetId(targetId: String): String = targetToActual(targetId)
   }
 
-
   def closeTxForOrderId(actions: ActionQueue, ids: IdManager, id: String): ActionQueue =
     actions match {
       case ActionQueue(Some(action), _) if ids.actualIdForTargetId(action.targetId) == id =>
@@ -442,90 +439,3 @@ object TradingEngine {
   def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
 
 }
-
-
-
-
-
-/**
-  * SessionActor processes market data as it comes in, as well as actions as they are
-  * emitted from strategies. Both of these data streams interact with session state, which
-  * this actor is a container for.
-  */
-//      class SessionActor extends Actor {
-//        import OrderManager._
-//
-//        var session: Session = Session()
-//        // TODO: All actions per strategy are executed sequentially. We may want to allow
-//        // concurrent actions if they are from different exchanges. May be helpful for
-//        // inter-exchange strategies where latency matters.
-//        var actions: ActionQueue = ActionQueue()
-//
-//        override def receive: Receive = {
-//          case action: OrderAction =>
-//            actions = actions.enqueue(action)
-//            touch()
-//
-//          case data: MarketData =>
-//
-//            // Process user data emitted from the OrderManager.
-//            val newSession = oms.emitUserData(data).foldLeft(session) {
-//              case (memo, UserTx(TradeTx(id, exchange, time, makerId, takerId, price, size))) =>
-//              case (memo, UserOrderEvent(event)) => event match {
-//                case OrderOpen(exchange, Order(id, pair, side, amount, price)) =>
-//                  memo.copy(
-//                    balances = memo.balances,
-//                    orders = memo.orders
-//                  )
-//                case OrderCanceled(id, exchange) =>
-//                  memo.copy(orders = memo.orders - id)
-//              }
-//            }
-//
-//            // Use a sequence number to enforce the rule that Session.handleEvents is only
-//            // allowed to be called in the current call stack.
-//            currentStrategySeqNr = Some(newSession.seqNr)
-//
-//            // Send market data to strategy
-//            strategy.handleData(data)(newSession)
-//
-//            // Lock the handleEvent method
-//            currentStrategySeqNr = None
-//
-//            // Incoming market data is the only thing that increments the session sequence number.
-//            session = newSession.copy(
-//              seqNr = session.seqNr + 1
-//            )
-//
-//          case rsp: ActionResponse => rsp match {
-//            case Ok =>
-//              actions = actions.closeActive
-//              touch()
-//            case Fail =>
-//              // TODO: This error should stop the show. Does it? I don't think it does currently.
-//              throw EngineError("Action error")
-//          }
-//        }
-//
-//        // Keep the actions flowing
-//        def touch(): Unit = {
-//          actions match {
-//            case ActionQueue(None, (next: OrderAction) +: rest) =>
-//              // Execute the action via the OMS.
-//              oms.submitAction(next) onComplete {
-//                case Success(rsp) =>
-//                  self ! rsp
-//                case Failure(err) =>
-//                  // System/network errors with the actual request will surface here.
-//                  // TODO: Same as above, make sure this exits the session.
-//                  throw EngineError("Network error", err)
-//              }
-//
-//              // If there's an action queued up and no active action, activate the next one.
-//              actions = ActionQueue(Some(next), rest)
-//
-//            case _ =>
-//              // Otherwise, nothing to do here.
-//          }
-//        }
-//      }
