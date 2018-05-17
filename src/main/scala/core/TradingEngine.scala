@@ -17,8 +17,7 @@ import scala.collection.immutable.Queue
   */
 class TradingEngine(strategyClassNames: Map[String, String],
                     dataSourceClassNames: Map[String, String],
-                    exchangeClassNames: Map[String, String],
-                    currencyConfigs: Map[String, CurrencyConfig])
+                    exchangeClassNames: Map[String, String])
   extends PersistentActor with ActorLogging {
 
   import TradingEngine._
@@ -31,12 +30,12 @@ class TradingEngine(strategyClassNames: Map[String, String],
   override def persistenceId: String = "trading-engine"
 
   /**
-    * Turns an incoming command into a sequence of [[Event]] objects that affect the state in some
-    * way and are then persisted, or into an [[EngineError]] to be returned to the sender.
+    * Turns an incoming command into a sequence of [[Event]] objects that affect the state in
+    * some way and are then persisted, or into an [[EngineError]] to be returned to the sender.
     */
   def processCommand(command: Command): Either[EngineError, Seq[Event]] = command match {
-    case StartTradingSession(strategyKey, strategyParams, mode) =>
 
+    case StartTradingSession(strategyKey, strategyParams, mode) =>
       // Check that we have a config for the requested strategy.
       if (!strategyClassNames.isDefinedAt(strategyKey)) {
         return Left(EngineError(s"Unknown strategy: $strategyKey"))
@@ -138,9 +137,6 @@ class TradingEngine(strategyClassNames: Map[String, String],
 
       // Keep track of currencies, inferred from transaction requests.
       var currencies = Map.empty[String, CurrencyConfig]
-      def declareCurrency(currency: String): Unit = {
-        currencies += (currency -> currencyConfigs(currency))
-      }
 
       // Initialize portfolio of accounts. When backtesting, we just use the initial balances
       // that were supplied to the session. When live trading we request balances from each
@@ -246,6 +242,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
                   })
               }
 
+              // Lorde, Lorde, Lorde .... I am Lorde
               newBalances = fills.foldLeft(newBalances) {
                 case (bs, Fill(_, _, fee, Pair(base, quote), price, size, _, _, Buy)) =>
                   bs + (
@@ -372,22 +369,27 @@ object TradingEngine {
   case class StartTradingSession(strategyKey: String,
                                  strategyParams: Json,
                                  mode: Mode) extends Command
-  trait Event
+
+  sealed trait Event
   case class SessionStarted(id: String,
                             strategyKey: String,
                             strategyParams: Json,
                             mode: Mode) extends Event
 
   final case class EngineError(private val message: String,
-                                 private val cause: Throwable = None.orNull)
+                               private val cause: Throwable = None.orNull)
     extends Exception(message, cause)
 
-  case class EngineState(sessions: Map[String, TradingSession] = Map.empty) {
+  case class EngineState(sessions: Map[String, TradingSessionRecord] = Map.empty) {
     /**
       * A pure function that updates the state in response to an event that occurred in the
       * engine. No side effects please!
       */
-    def update(event: Event): EngineState = ???
+    def update(event: Event): EngineState = event match {
+      case SessionStarted(id, strategyKey, strategyParams, mode) =>
+        copy(sessions = sessions + (id ->
+          TradingSessionRecord(id, strategyKey, strategyParams, mode)))
+    }
   }
 
   // Manages the relationships of the three types of order ids in our system:

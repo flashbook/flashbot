@@ -100,7 +100,8 @@ object Main {
             config.strategies,
             config.data_sources.mapValues(_.`class`),
             config.exchanges.mapValues(_.`class`))),
-          "trading-engine")
+          "trading-engine"
+        )
         Http().bindAndHandle(api.routes(engine), "localhost", 9020)
     }
 

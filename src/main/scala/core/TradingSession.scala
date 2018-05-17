@@ -1,5 +1,7 @@
 package core
 
+import io.circe.Json
+
 object TradingSession {
   trait Event
   case class LogMessage(message: String) extends Event
@@ -11,10 +13,15 @@ object TradingSession {
 
   def exchangeNameForTargetId(id: String): String = id.split(":").head
 
-  trait Mode
+  sealed trait Mode
   case class Backtest(range: TimeRange) extends Mode
   case object Paper extends Mode
   case object Live extends Mode
+
+  case class TradingSessionRecord(id: String,
+                                  strategy: String,
+                                  strategyParams: Json,
+                                  mode: Mode)
 }
 
 trait TradingSession {

@@ -2,8 +2,7 @@ package strategies
 
 import java.time.{Instant, ZonedDateTime}
 
-import core.Strategy.PureStrategy
-import core.{BarSize, MarketData, Pair, Trade, TradingSession}
+import core.{BarSize, MarketData, Pair, Strategy, Trade, TradingSession}
 import io.circe.Json
 import org.ta4j.core.{BaseTimeSeries, TimeSeries}
 
@@ -11,7 +10,7 @@ import org.ta4j.core.{BaseTimeSeries, TimeSeries}
   * This is an example of how to build a trading strategy based on common technical indicators
   * from the Ta4j library.
   */
-class DualMovingAverageCrossover extends PureStrategy {
+class DualMovingAverageCrossover extends Strategy {
   import io.circe.generic.auto._
 
   override val title = "Dual Moving Average Crossover"
