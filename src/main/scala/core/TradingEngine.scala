@@ -153,7 +153,6 @@ class TradingEngine(strategyClassNames: Map[String, String],
       val strategy = strategyOpt.get
       val sessionId = UUID.randomUUID.toString
       var currentStrategySeqNr: Option[Long] = None
-//      val sessionActor = context.actorOf(Props[SessionActor], "session")
       val targetManager = new TargetManager
 
       /**
@@ -263,6 +262,11 @@ class TradingEngine(strategyClassNames: Map[String, String],
               }
 
             case _ =>
+          }
+
+          // Send the order targets to the target manager and enqueue the actions emitted by it.
+          targets.foreach { target =>
+            newActions = newActions.enqueue(targetManager.step(target))
           }
 
           session.copy(

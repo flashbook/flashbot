@@ -16,15 +16,17 @@ object Action {
                             percent: Percent, price: Double) extends OrderAction
   case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends OrderAction
 
-  trait ActionResponse
-  case object Ok extends ActionResponse
-  // TODO: Add more specific failures and handle them (such as rate limit retries)
-  case object Fail extends ActionResponse
-
   case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
     def enqueue(action: Action): ActionQueue = copy(queue = queue.enqueue(action))
+    def enqueue(actions: Seq[Action]): ActionQueue =
+      actions.foldLeft(this) { (memo, action) => memo.enqueue(action) }
     def closeActive: ActionQueue = active match {
       case Some(_) => copy(active = None)
     }
   }
+
+  //  trait ActionResponse
+  //  case object Ok extends ActionResponse
+  //  // TODO: Add more specific failures and handle them (such as rate limit retries)
+  //  case object Fail extends ActionResponse
 }
