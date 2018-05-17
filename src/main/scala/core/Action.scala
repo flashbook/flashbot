@@ -4,17 +4,16 @@ import core.Order.Side
 
 import scala.collection.immutable.Queue
 
-trait Action {
+sealed trait Action {
   def targetId: String
 }
 
 object Action {
-  trait OrderAction extends Action
   case class PostMarketOrder(id: String, targetId: String, pair: Pair, side: Side,
-                             percent: Percent) extends OrderAction
+                             percent: Percent) extends Action
   case class PostLimitOrder(id: String, targetId: String, pair: Pair, side: Side,
-                            percent: Percent, price: Double) extends OrderAction
-  case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends OrderAction
+                            percent: Percent, price: Double) extends Action
+  case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends Action
 
   case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
     def enqueue(action: Action): ActionQueue = copy(queue = queue.enqueue(action))

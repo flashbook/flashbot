@@ -9,6 +9,8 @@ object TradingSession {
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
 
+  def exchangeNameForTargetId(id: String): String = id.split(":").head
+
   trait Mode
   case class Backtest(range: TimeRange) extends Mode
   case object Paper extends Mode

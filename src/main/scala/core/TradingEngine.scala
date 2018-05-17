@@ -138,8 +138,6 @@ class TradingEngine(strategyClassNames: Map[String, String],
         }
       }
 
-      // Here, is where the fun begins.
-
       // Keep track of currencies, inferred from transaction requests.
       var currencies = Map.empty[String, CurrencyConfig]
       def declareCurrency(currency: String): Unit = {
@@ -153,15 +151,14 @@ class TradingEngine(strategyClassNames: Map[String, String],
       val strategy = strategyOpt.get
       val sessionId = UUID.randomUUID.toString
       var currentStrategySeqNr: Option[Long] = None
-      val targetManager = new TargetManager
 
       /**
         * The trading session that we fold market data over. We pass the running session instance
         * to the strategy every time we call `handleData`.
         */
       case class Session(seqNr: Long = 0,
-//                         orders: Map[String, Map[Pair, Order]] = Map.empty,
                          balances: Map[Account, Double] = Map.empty,
+                         targetManager: TargetManager = TargetManager(),
                          ids: IdManager = IdManager(),
                          actions: ActionQueue = ActionQueue()) extends TradingSession {
 
@@ -198,6 +195,8 @@ class TradingEngine(strategyClassNames: Map[String, String],
         }
       }
 
+      // Here, is where the fun begins.
+
       // Merge market data streams from the data sources we just loaded and stream the data into
       // the strategy instance. If this trading session is a backtest then we merge the data
       // streams by time. But if this is a live trading session then data is sent first come,
@@ -215,7 +214,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
-        .scan(Session()) { case (session @ Session(_, balances, ids, actions), data) =>
+        .scan(Session()) { case (session @ Session(seqNr, balances, tm, ids, actions), data) =>
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
           // then lock the handleEvent method again.
@@ -227,6 +226,7 @@ class TradingEngine(strategyClassNames: Map[String, String],
           var newIds = ids
           var newActions = actions
           var newBalances = balances
+          var newTM = tm
 
           // Update ids and actions bookkeeping state in response to fills and user data emitted
           // from the relevant exchange.
@@ -265,15 +265,32 @@ class TradingEngine(strategyClassNames: Map[String, String],
           }
 
           // Send the order targets to the target manager and enqueue the actions emitted by it.
-          targets.foreach { target =>
-            newActions = newActions.enqueue(targetManager.step(target))
+          (newActions, newTM) = targets.foldLeft((newActions, newTM)) {
+            case ((as, ntm), target) =>
+              tm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
+          }
+
+          // Here is where we tell the exchange to do stuff, like place or cancel orders.
+          newActions match {
+            case ActionQueue(None, next +: rest) =>
+              newActions = ActionQueue(Some(next), rest)
+              next match {
+                case PostMarketOrder(id, targetId, pair, side, percent) =>
+                  newIds = newIds.initOrder(targetId, id)
+                  session.exchanges(exchangeNameForTargetId(targetId))
+                    .order()
+                case PostLimitOrder(id, targetId, pair, side, percent, price) =>
+                  newIds = newIds.initOrder(targetId, id)
+                case CancelLimitOrder(id, targetId, pair) =>
+              }
           }
 
           session.copy(
-            seqNr = session.seqNr + 1,
+            seqNr = seqNr + 1,
+            balances = newBalances,
+            targetManager = newTM,
             ids = newIds,
-            actions = newActions,
-            balances = newBalances
+            actions = newActions
           )
         }
         .runForeach(println)
@@ -477,4 +494,5 @@ object TradingEngine {
         actions.closeActive
       case _ => actions
     }
+
 }
