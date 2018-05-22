@@ -4,7 +4,9 @@ import java.io.File
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import core.{DataSource, TradingEngine}
+import data.IngestService
 import io.prometheus.client.exporter.HTTPServer
 
 import scala.concurrent.ExecutionContext
@@ -33,7 +35,7 @@ object Main {
 
     opt[File]('c', "config")
       .action((x, c) => c.copy(config = x))
-      .text("Required config JSON file")
+      .text("Config file")
 
     opt[String]('n', "name")
       .action((x, c) => c.copy(name = x))
@@ -69,16 +71,23 @@ object Main {
 //    .labelNames("product")
 //    .register()
 
-  implicit val system: ActorSystem = ActorSystem("flashbot")
-  implicit val mat: Materializer = ActorMaterializer()
-  implicit val ec: ExecutionContext = system.dispatcher
-
   def main(args: Array[String]): Unit = {
     import io.circe.generic.auto._
     import io.circe.syntax._
 
     val opts = optsParser.parse(args, Opts()).get
-    val config = Source.fromFile(opts.config).getLines.mkString.asJson.as[ConfigFile].right.get
+    val flashbotConfig = Source.fromFile(opts.config)
+      .getLines.mkString.asJson.as[ConfigFile].right.get
+
+    val systemConfig = ConfigFactory.load()
+      .withValue("akka.persistence.journal.leveldb.dir",
+        ConfigValueFactory.fromAnyRef(s"${opts.dataPath}/journal"))
+      .withValue("akka.persistence.snapshot-store.local.dir",
+        ConfigValueFactory.fromAnyRef(s"${opts.dataPath}/snapshot-store"))
+
+    implicit val system: ActorSystem = ActorSystem("flashbot", systemConfig)
+    implicit val mat: Materializer = ActorMaterializer()
+    implicit val ec: ExecutionContext = system.dispatcher
 
     if (opts.metricsPort != 0)
       metricsServer = Some(new HTTPServer(opts.metricsPort))
@@ -86,37 +95,25 @@ object Main {
     opts.cmd match {
       case "ingest" =>
         val srcNames =
-          if (opts.sources.isEmpty) config.data_sources.keySet
+          if (opts.sources.isEmpty) flashbotConfig.data_sources.keySet
           else opts.sources
 
         srcNames.foreach(srcName => {
           val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
-          actor ! (srcName, config.data_sources(srcName))
+          actor ! (srcName, List(opts.dataPath, "sources").mkString("/"),
+            flashbotConfig.data_sources(srcName))
         })
 
       case "trade" =>
         val engine = system.actorOf(
           Props(new TradingEngine(
-            config.strategies,
-            config.data_sources.mapValues(_.`class`),
-            config.exchanges.mapValues(_.`class`))),
+            flashbotConfig.strategies,
+            flashbotConfig.data_sources.mapValues(_.`class`),
+            flashbotConfig.exchanges.mapValues(_.`class`))),
           "trading-engine"
         )
         Http().bindAndHandle(api.routes(engine), "localhost", 9020)
     }
 
-  }
-
-  class IngestService extends Actor with ActorLogging {
-    override def receive: Receive = {
-      case (name: String, config: DataSource.DataSourceConfig) =>
-        config.topics.foreach({ case (topicName, _) =>
-            config.data_types.foreach({ case (typeName, _) =>
-                log.info("Ingesting {}/{}/{}", name, topicName, typeName)
-            })
-        })
-        Class.forName(config.`class`).newInstance.asInstanceOf[DataSource]
-          .ingest(config.topics, config.data_types)
-    }
   }
 }

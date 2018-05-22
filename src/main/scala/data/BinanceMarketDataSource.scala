@@ -1,5 +1,0 @@
-package data
-
-class BinanceMarketDataSource {
-
-}

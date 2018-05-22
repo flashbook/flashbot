@@ -2,19 +2,22 @@ package core
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.Source
+import akka.stream.ActorMaterializer
+import akka.stream.scaladsl.{Sink, Source}
 import io.circe.Json
 
-abstract class DataSource(val dataPath: String) {
-  def ingest(topics: Map[String, Json],
+abstract class DataSource {
+  def ingest(dataDir: String,
+             topics: Map[String, Json],
              dataTypes: Map[String, DataSource.DataTypeConfig])
-            (implicit sys: ActorSystem)
+            (implicit sys: ActorSystem,
+             mat: ActorMaterializer)
 
-  def index(topic: String, dataType: String): Seq[TimeRange]
-
-  def stream(topic: String,
+  def stream(sink: Sink[MarketData, NotUsed],
+             dataDir: String,
+             topic: String,
              dataType: String,
-             timeRange: TimeRange): Source[MarketData, NotUsed]
+             timeRange: TimeRange): Unit
 }
 
 object DataSource {
@@ -31,5 +34,18 @@ object DataSource {
   def parseAddress(addr: String): Address = addr.split("/") match {
     case (srcKey: String) :: (topic: String) :: (dataType: String) :: Nil =>
       Address(srcKey, topic, dataType)
+  }
+
+  trait DataType
+  sealed trait BuiltInType extends DataType
+  case object FullBook extends BuiltInType
+  case class DepthBook(depth: Int) extends BuiltInType
+  case object Trades extends BuiltInType
+
+  def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_") match {
+    case "book" :: Nil => Some(FullBook)
+    case "book" :: (d: String) :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
+    case "trades" :: Nil => Some(Trades)
+    case _ => None
   }
 }

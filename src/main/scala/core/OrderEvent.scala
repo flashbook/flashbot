@@ -1,6 +1,7 @@
 package core
 
-import core.Order.{OrderType, Side, Limit, Market}
+import core.MarketData.{Sequenced, Timestamped}
+import core.Order.{Limit, Market, OrderType, Side}
 
 sealed trait OrderEvent {
   val orderId: String
@@ -56,4 +57,8 @@ object DoneReason {
     case "canceled" => Canceled
     case "filled" => Filled
   }
+}
+
+trait RawOrderEvent extends Timestamped with Sequenced {
+  def toOrderEvent: OrderEvent
 }

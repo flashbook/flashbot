@@ -1,3 +1,5 @@
+import core.MarketData.GenMD
+
 package object core {
 
   // TODO: Can we use refinement types to enforce the bounds?
@@ -27,7 +29,12 @@ package object core {
     def toSeq: Seq[String] = List(base, quote)
   }
 
-  case class Trade(price: Double, size: Double)
+  case class Trade(id: String, time: Long, price: Double, size: Double)
+
+  case class TradeMD(source: String, topic: String, data: Trade) extends GenMD[Trade] {
+    val dataType: String = "trades"
+    def time: Long = data.time
+  }
 
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])

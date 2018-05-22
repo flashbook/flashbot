@@ -22,8 +22,11 @@
         "ltc_btc": {}
       },
       "data_types": {
-        "trades": {
+        "book": {
           "retention": "30d"
+        },
+        "trades": {
+          "retention": "90d"
         }
       }
     },
@@ -40,7 +43,7 @@
       },
       "data_types": {
         "trades": {
-          "retention": "30d"
+          "retention": "90d"
         }
       }
     },
@@ -60,7 +63,7 @@
       },
       "data_types": {
         "tweets": {
-          "retention": "30d"
+          "retention": "90d"
         }
       }
     }

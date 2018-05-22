@@ -2,7 +2,7 @@ package strategies
 
 import java.time.{Instant, ZonedDateTime}
 
-import core.{BarSize, MarketData, Pair, Strategy, Trade, TradingSession}
+import core.{BarSize, MarketData, Pair, Strategy, Trade, TradeMD, TradingSession}
 import io.circe.Json
 import org.ta4j.core.{BaseTimeSeries, TimeSeries}
 
@@ -34,7 +34,7 @@ class DualMovingAverageCrossover extends Strategy {
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = {
     data match {
-      case trade: Trade =>
+      case TradeMD(source, topic, Trade(time, price, size)) =>
     }
   }
 }
