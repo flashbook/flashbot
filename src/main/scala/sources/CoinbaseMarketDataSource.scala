@@ -16,8 +16,8 @@ import core.Order.{OrderType, Side}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
 import core.Utils.{ISO8601ToMicros, parseJson, parseProductId}
 import data.OrderBookProvider.Subscribe
-import data.PersistentQueue.{PersistentQueue, QueueBound}
-import data.{OrderBookProvider, PersistentQueue}
+import data.TimeLog.{TimeLog, QueueBound}
+import data.{OrderBookProvider, TimeLog}
 import io.circe.Json
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import net.openhft.chronicle.queue.TailerDirection
@@ -25,10 +25,12 @@ import net.openhft.chronicle.queue.TailerDirection
 import scala.collection.immutable.{Queue, SortedSet}
 import scala.concurrent.Future
 
-class GdaxMarketDataSource extends DataSource {
+class CoinbaseMarketDataSource extends DataSource {
 
   // Save an order book snapshot every 1M events per product
   val snapshotInterval = 1000000
+
+  val NAME = "coinbase"
 
   override def ingest(dataDir: String,
                       topics: Map[String, Json],
@@ -36,11 +38,12 @@ class GdaxMarketDataSource extends DataSource {
                      (implicit system: ActorSystem,
                       mat: ActorMaterializer): Unit = {
 
+    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
     val fullStream = Source
       .actorRef[OrderBookMD[APIOrderEvent]](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(1000, _.product)
-      .scan[(Option[(PersistentQueue[APIOrderEvent], PersistentQueue[SnapshotItem],
-                      PersistentQueue[TradeMD])],
+      .scan[(Option[(TimeLog[APIOrderEvent], TimeLog[SnapshotItem],
+                      TimeLog[TradeMD])],
             Long, Option[OrderBookMD[APIOrderEvent]])]((None, -1, None)) {
         case ((queueOpt, count, prev), book) =>
           (Some(queueOpt.getOrElse((
@@ -55,7 +58,7 @@ class GdaxMarketDataSource extends DataSource {
                 Some(md @ OrderBookMD(_, _, _, Some(rawEvent), _))) =>
 
           // Persist the full order book stream
-          if (dataTypes.isDefinedAt("book")) {
+          if (dts.isDefinedAt(FullBook)) {
             // Save events to disk
             eventsQueue.enqueue(rawEvent)
             // And periodic snapshots too
@@ -72,10 +75,10 @@ class GdaxMarketDataSource extends DataSource {
           }
 
           // Persist trades separately. Derived from the same order book stream.
-          if (dataTypes.isDefinedAt("trades")) {
+          if (dts.isDefinedAt(Trades)) {
             rawEvent.toOrderEvent match {
               case Match(tradeId, product, time, size, price, _, _, _) =>
-                tradesQueue.enqueue(TradeMD("gdax", product.toString,
+                tradesQueue.enqueue(TradeMD(NAME, product.toString,
                   Trade(tradeId.toString, time, price, size)))
               case _ =>
             }
@@ -95,9 +98,9 @@ class GdaxMarketDataSource extends DataSource {
       case Some(x) => (x, timeRange) match {
 
         case (FullBook, TimeRange(from, to)) =>
-          val eventsQueue: PersistentQueue[APIOrderEvent] =
+          val eventsQueue: TimeLog[APIOrderEvent] =
             queue(dataDir, parseProductId(topic), "book/events")
-          val snapshotQueue: PersistentQueue[SnapshotItem] =
+          val snapshotQueue: TimeLog[SnapshotItem] =
             queue(dataDir, parseProductId(topic), "book/snapshots")
 
           // Read the snapshots queue backwards until we get the latest snapshot in memory.
@@ -114,7 +117,7 @@ class GdaxMarketDataSource extends DataSource {
           }, None, QueueBound.End, TailerDirection.BACKWARD)
 
           if (snapSeq.isDefined) {
-            var state = OrderBookMD[APIOrderEvent]("gdax", topic)
+            var state = OrderBookMD[APIOrderEvent](NAME, topic)
               .addSnapshot(snapSeq.get.head.seq, snapSeq.get)
             eventsQueue.scan({ event =>
               val prevState = state
@@ -132,7 +135,7 @@ class GdaxMarketDataSource extends DataSource {
           ref ! Success
 
         case (Trades, TimeRange(from, to)) =>
-          val tradesQueue: PersistentQueue[TradeMD] =
+          val tradesQueue: TimeLog[TradeMD] =
             queue(dataDir, parseProductId(topic), "trades")
           tradesQueue.scan({ md =>
             if (md.time >= from) ref ! md
@@ -142,7 +145,7 @@ class GdaxMarketDataSource extends DataSource {
           ref ! Success
 
         case (DepthBook(_), _) =>
-          throw new RuntimeException(s"GDAX order book aggregations not yet implemented")
+          throw new RuntimeException(s"Coinbase order book aggregations not yet implemented")
       }
       case None =>
         throw new RuntimeException(s"Unknown data type: $dataType")
@@ -150,7 +153,7 @@ class GdaxMarketDataSource extends DataSource {
   }
 
   private def queue[T](dataDir: String, product: Pair, name: String) =
-    PersistentQueue[T](new File(s"$dataDir/gdax/$product/$name"))
+    TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**
     * Additional metadata attached to each SnapshotOrder that helps us read snapshots from the
@@ -164,7 +167,7 @@ class GdaxMarketDataSource extends DataSource {
   class LiveGDAXMarketData(updateFn: OrderBookMD[APIOrderEvent] => Unit)
                           (implicit system: ActorSystem,
                            mat: ActorMaterializer)
-    extends OrderBookProvider[APIOrderEvent]("gdax", updateFn) {
+    extends OrderBookProvider[APIOrderEvent](NAME, updateFn) {
 
     import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
     import io.circe.generic.auto._

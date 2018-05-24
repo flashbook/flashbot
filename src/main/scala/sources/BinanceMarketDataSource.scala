@@ -12,11 +12,14 @@ class BinanceMarketDataSource extends DataSource {
                       topics: Map[String, Json],
                       dataTypes: Map[String, DataSource.DataTypeConfig])
                      (implicit sys: ActorSystem,
-                      mat: ActorMaterializer): Unit = ???
+                      mat: ActorMaterializer): Unit = {
+  }
 
   override def stream(sink: Sink[MarketData, NotUsed],
-                       dataDir: String,
+                      dataDir: String,
                       topic: String,
                       dataType: String,
-                      timeRange: core.TimeRange): Unit = ???
+                      timeRange: core.TimeRange): Unit = {
+
+  }
 }

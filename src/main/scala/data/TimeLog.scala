@@ -1,21 +1,19 @@
 package data
 
 import java.io.File
+import java.util
+import java.util.Comparator
 
+import core.MarketData.Timestamped
 import io.circe.{Decoder, Encoder, Printer}
 import net.openhft.chronicle.bytes.Bytes
+import net.openhft.chronicle.core.time.TimeProvider
 import net.openhft.chronicle.queue._
 import net.openhft.chronicle.queue.impl.StoreFileListener
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder
 import net.openhft.chronicle.threads.Pauser
 
-object PersistentQueue {
-
-  sealed trait QueueBound
-  object QueueBound {
-    case object Start extends QueueBound
-    case object End extends QueueBound
-  }
+object TimeLog {
 
   sealed trait ScanDuration
   object ScanDuration {
@@ -61,21 +59,26 @@ object PersistentQueue {
     }
   }
 
-  def apply[T](path: File): PersistentQueue[T] = new PersistentQueue[T](path)
+  def apply[T <: Timestamped](path: File): TimeLog[T] = new TimeLog[T](path)
 
-  class PersistentQueue[T](path: File,
-                           resourceManager: ResourceManager = defaultResourceManager) {
+  class TimeLog[T <: Timestamped](path: File) {
 
     import io.circe.syntax._
     import io.circe.parser._
-    import TailerDirection._
 
     private val RetentionPeriod = 1000 * 60 * 60 * 24 * 30
+
+    var inFlightMessage: Option[T] = None
+    object TimestampProvider extends TimeProvider {
+      override def currentTimeMillis: Long =
+        math.floor(inFlightMessage.get.time.toDouble / 1000000).toLong
+    }
 
     private val queue = SingleChronicleQueueBuilder
       .binary(path)
       .rollCycle(RollCycles.DAILY)
-      .storeFileListener(resourceManager)
+      .timeProvider(TimestampProvider)
+      .storeFileListener(defaultResourceManager)
       .build()
 
     private val pauser = Pauser.balanced()
@@ -83,18 +86,20 @@ object PersistentQueue {
     private val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
 
     def enqueue(msg: T)(implicit en: Encoder[T]): Unit = {
+      inFlightMessage = Some(msg)
       val appender: ExcerptAppender = queue.acquireAppender
       appender.writeBytes(Bytes.fromString(printer.pretty(msg.asJson)))
       pauser.unpause()
+      inFlightMessage = None
     }
 
     // A scan that accumulates a value as it iterates.
     def reduceWhile[A](handler: (A, T) => (A, Boolean),
                        zero: A,
-                       from: QueueBound = QueueBound.Start,
-                       direction: TailerDirection = FORWARD,
+                       from: Long = 0,
                        duration: ScanDuration = ScanDuration.Finite)
                       (implicit de: Decoder[T]): A = {
+
       var result: A = zero
       scan(
         handler = msg => {
@@ -103,7 +108,6 @@ object PersistentQueue {
           shouldContinue
         },
         from,
-        direction,
         duration
       )
       result
@@ -111,12 +115,11 @@ object PersistentQueue {
 
     // By default, scans the entire table once in order.
     def scan(handler: T => Boolean,
-             from: QueueBound = QueueBound.Start,
-             direction: TailerDirection = FORWARD,
+             from: Long = 0,
              duration: ScanDuration = ScanDuration.Finite)
             (implicit de: Decoder[T]): Unit = {
-      var tailer: ExcerptTailer = queue.createTailer().direction(direction)
-      tailer = if (from == QueueBound.Start) tailer.toStart else tailer.toEnd
+      var tailer: ExcerptTailer = queue.createTailer()
+      moveToTime(tailer, from)
       _scan(
         msg => handler(msg),
         tailer,
@@ -136,6 +139,29 @@ object PersistentQueue {
 
     def close(): Unit = {
       queue.close()
+    }
+
+    // Binary search logic taken from net.openhft.chronicle.queue.impl.single.BinarySearch
+    def moveToTime(tailer: ExcerptTailer, time: Long): Long = {
+      val start = tailer.toStart.index
+      val end = tailer.toEnd.index
+      val rollCycle = queue.rollCycle
+      val startCycle = rollCycle.toCycle(start)
+      val endCycle = rollCycle.toCycle(end)
+
+      def findWithinCycle(cycle: Int): Long = ???
+
+      def findCycleLinearSearch(cycles: util.NavigableSet[java.lang.Long]): Long = ???
+
+      if (startCycle == endCycle)
+        return findWithinCycle(startCycle)
+
+      val cycles = queue.listCyclesBetween(startCycle, endCycle)
+      val cycle = findCycleLinearSearch(cycles)
+      if (cycle == -1)
+        return -1
+
+      findWithinCycle(cycle.toInt)
     }
   }
 }
