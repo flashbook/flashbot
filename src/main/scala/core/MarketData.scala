@@ -46,13 +46,6 @@ object MarketData {
     def seq: Long
   }
 
-  trait Timestamped {
-    def time: Long
-  }
-  object Timestamped {
-    val ordering: Ordering[Timestamped] = Ordering.by(_.time)
-  }
-
   trait HasProduct {
     def product: Pair
   }

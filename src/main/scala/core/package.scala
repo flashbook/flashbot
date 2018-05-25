@@ -38,4 +38,11 @@ package object core {
 
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])
+
+  trait Timestamped {
+    def time: Long
+  }
+  object Timestamped {
+    val ordering: Ordering[Timestamped] = Ordering.by(_.time)
+  }
 }

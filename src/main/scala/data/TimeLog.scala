@@ -2,9 +2,8 @@ package data
 
 import java.io.File
 import java.util
-import java.util.Comparator
 
-import core.MarketData.Timestamped
+import core.Timestamped
 import io.circe.{Decoder, Encoder, Printer}
 import net.openhft.chronicle.bytes.Bytes
 import net.openhft.chronicle.core.time.TimeProvider
@@ -118,7 +117,7 @@ object TimeLog {
              from: Long = 0,
              duration: ScanDuration = ScanDuration.Finite)
             (implicit de: Decoder[T]): Unit = {
-      var tailer: ExcerptTailer = queue.createTailer()
+      val tailer: ExcerptTailer = queue.createTailer()
       moveToTime(tailer, from)
       _scan(
         msg => handler(msg),
@@ -141,27 +140,87 @@ object TimeLog {
       queue.close()
     }
 
-    // Binary search logic taken from net.openhft.chronicle.queue.impl.single.BinarySearch
-    def moveToTime(tailer: ExcerptTailer, time: Long): Long = {
+    // Binary search code taken from net.openhft.chronicle.queue.impl.single.BinarySearch
+    def moveToTime(tailer: ExcerptTailer, time: Long)(implicit de: Decoder[T]): Unit = {
       val start = tailer.toStart.index
       val end = tailer.toEnd.index
-      val rollCycle = queue.rollCycle
+      val rollCycle: RollCycle = queue.rollCycle
       val startCycle = rollCycle.toCycle(start)
       val endCycle = rollCycle.toCycle(end)
 
-      def findWithinCycle(cycle: Int): Long = ???
+      def findWithinCycle(cycle: Int): Long = {
+        var lowSeqNum: Long = 0
+        var highSeqNum = queue.exceptsPerCycle(cycle) - 1
+        if (highSeqNum == 0)
+          return rollCycle.toIndex(cycle, 0)
 
-      def findCycleLinearSearch(cycles: util.NavigableSet[java.lang.Long]): Long = ???
+        if (highSeqNum < lowSeqNum)
+          return -1
 
-      if (startCycle == endCycle)
-        return findWithinCycle(startCycle)
+        var midIndex: Long = 0
 
-      val cycles = queue.listCyclesBetween(startCycle, endCycle)
-      val cycle = findCycleLinearSearch(cycles)
-      if (cycle == -1)
-        return -1
+        while (lowSeqNum <= highSeqNum) {
+          val midSeqNum = (lowSeqNum + highSeqNum) >>> 1L
+          midIndex = rollCycle.toIndex(cycle, midSeqNum)
+          tailer.moveToIndex(midIndex)
 
-      findWithinCycle(cycle.toInt)
+          val dc = Option(tailer.readText())
+          if (dc.isEmpty)
+            return -1
+
+          val compare = decode(dc.get).right.get.time.compareTo(time)
+          if (compare < 0)
+            lowSeqNum = midSeqNum + 1
+          else if (compare > 0)
+            highSeqNum = midSeqNum - 1
+          else
+            return midIndex
+        }
+
+        -midIndex
+      }
+
+      def findCycleLinearSearch(cycles: util.NavigableSet[java.lang.Long]): Long = {
+        val iterator = cycles.iterator
+        if (!iterator.hasNext)
+          return -1
+
+        val rollCycle = queue.rollCycle
+        var prevIndex = iterator.next
+
+        while (iterator.hasNext) {
+          val current = iterator.next
+          val b = tailer.moveToIndex(rollCycle.toIndex(current.toInt, 0))
+          if (!b)
+            return prevIndex
+
+          val compare = decode(tailer.readText).right.get.time.compareTo(time)
+          if (compare == 0) {
+            return compare
+          } else if (compare > 0) {
+            return prevIndex
+          }
+          prevIndex = current
+        }
+        prevIndex
+      }
+
+      def findIt: Long = {
+        if (startCycle == endCycle)
+          return findWithinCycle(startCycle)
+
+        val cycles = queue.listCyclesBetween(startCycle, endCycle)
+        val cycle = findCycleLinearSearch(cycles)
+        if (cycle == -1)
+          return -1
+
+        findWithinCycle(cycle.toInt)
+      }
+
+      tailer.moveToIndex(findIt match {
+        case -1 => 0
+        case x => math.abs(x)
+      })
     }
   }
 }
