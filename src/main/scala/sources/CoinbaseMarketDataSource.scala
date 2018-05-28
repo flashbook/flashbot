@@ -3,8 +3,7 @@ package sources
 import java.io.File
 
 import akka.NotUsed
-import akka.actor.Status.Success
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
@@ -135,7 +134,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
           eventsQueue.close()
           snapshotQueue.close()
-          ref ! Success
+          ref ! Status.Success
 
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue: TimeLog[TradeMD] =
@@ -147,7 +146,7 @@ class CoinbaseMarketDataSource extends DataSource {
           }
 
           tradesQueue.close()
-          ref ! Success
+          ref ! Status.Success
 
         case (DepthBook(_), _) =>
           throw new RuntimeException(s"Coinbase order book aggregations not yet implemented")

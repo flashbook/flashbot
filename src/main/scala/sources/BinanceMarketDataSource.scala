@@ -3,7 +3,7 @@ package sources
 import java.io.File
 
 import akka.NotUsed
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
@@ -14,8 +14,9 @@ import core.AggBook.AggBookMD
 import core.{AggBook, DataSource, MarketData, Pair, Timestamped, Trade, TradeMD}
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import core.Utils._
-import core.{Bid, Ask}
+import core.{Ask, Bid}
 import data.TimeLog
+import data.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import io.circe.syntax._
@@ -27,6 +28,7 @@ import scala.util.{Failure, Success}
 class BinanceMarketDataSource extends DataSource {
 
   val SRC = "binance"
+  val BOOK_DEPTH = 1000
   val MAX_PRODUCTS = 10000
   val SNAPSHOT_INTERVAL = 100000
 
@@ -123,6 +125,27 @@ class BinanceMarketDataSource extends DataSource {
                       topic: String,
                       dataType: String,
                       timeRange: core.TimeRange): Unit = {
+    val ref = Source.actorRef(Int.MaxValue, OverflowStrategy.fail).to(sink).run
+    parseBuiltInDataType(dataType) match {
+      case Some(DepthBook(BOOK_DEPTH)) =>
+
+      case Some(DepthBook(x)) =>
+        throw new RuntimeException(s"Invalid depth: $x")
+
+      case Some(Trades) =>
+        val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
+        tradesLog.scan(timeRange.from) { md =>
+          ref ! md
+          timeRange.to.forall(md.time < _)
+        }
+        tradesLog.close()
+        ref ! Status.Success
+
+      case Some(_) =>
+        throw new RuntimeException(s"Unsupported data type: $dataType")
+      case None =>
+        throw new RuntimeException(s"Unknown data type: $dataType")
+    }
   }
 
   /**
@@ -209,7 +232,7 @@ class BinanceMarketDataSource extends DataSource {
         // If this is the first event, request the snapshot
         if (!hasRequestedSnapshot) {
           hasRequestedSnapshot = true
-          getSnapshot onComplete {
+          getSnapshot(product) onComplete {
             case Success(snapshot) => self ! snapshot
             case Failure(err) => throw err
           }
@@ -220,7 +243,7 @@ class BinanceMarketDataSource extends DataSource {
 
       case DepthSnapshotBody(lastUpdateId, bids, asks) =>
         // Turn the depth snapshot into the first state
-        state = Some(applyPricePoints(AggBook(1000), bids, asks))
+        state = Some(applyPricePoints(AggBook(BOOK_DEPTH), bids, asks))
 
         // Now replay all events in buffer, dropping ones that occurred before the snapshot.
         flushBuffer(Some(lastUpdateId))
@@ -238,9 +261,10 @@ class BinanceMarketDataSource extends DataSource {
       }
     }
 
-    private def getSnapshot: Future[DepthSnapshotBody] =
+    private def getSnapshot(p: Pair): Future[DepthSnapshotBody] =
       Http().singleRequest(HttpRequest(
-        uri = "https://www.binance.com/api/v1/depth?symbol=BNBBTC&limit=1000"
+        uri = "https://www.binance.com/api/v1/depth?" +
+          s"symbol=${(p.base + p.quote).toUpperCase}&limit=$BOOK_DEPTH"
       )).flatMap(r => Unmarshal(r.entity).to[DepthSnapshotBody])
   }
 
