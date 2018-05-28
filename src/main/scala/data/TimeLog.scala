@@ -2,6 +2,7 @@ package data
 
 import java.io.File
 import java.util
+import java.util.Comparator
 
 import core.Timestamped
 import io.circe.{Decoder, Encoder, Printer}
@@ -93,20 +94,20 @@ object TimeLog {
     }
 
     // A scan that accumulates a value as it iterates.
-    def reduceWhile[A](from: Long,
-                       zero: A,
-                       duration: ScanDuration = ScanDuration.Finite,
-                       handler: (A, T) => (A, Boolean))
-                      (implicit de: Decoder[T]): A = {
-
-      var result: A = zero
-      scan(from, duration) { msg =>
-        val (newResult, shouldContinue) = handler(result, msg)
-        result = newResult
-        shouldContinue
-      }
-      result
-    }
+//    def reduceWhile[A](from: Long,
+//                       zero: A,
+//                       duration: ScanDuration = ScanDuration.Finite,
+//                       handler: (A, T) => (A, Boolean))
+//                      (implicit de: Decoder[T]): A = {
+//
+//      var result: A = zero
+//      scan(from, duration) { msg =>
+//        val (newResult, shouldContinue) = handler(result, msg)
+//        result = newResult
+//        shouldContinue
+//      }
+//      result
+//    }
 
     def scanBackwards(handler: T => Boolean): Unit = {
       _scan(
@@ -118,13 +119,14 @@ object TimeLog {
       )
     }
 
-    def scan(from: Long,
-             duration: ScanDuration = ScanDuration.Finite)
-            (handler: T => Boolean)
-            (implicit de: Decoder[T]): Unit = {
+    def scan[U <: Ordered[U]](from: U,
+                              comparing: T => U,
+                              duration: ScanDuration = ScanDuration.Finite)
+                             (handler: T => Boolean)
+                             (implicit de: Decoder[T]): Unit = {
       _scan(
         msg => handler(msg),
-        moveToTime(queue.createTailer(), from),
+        _search(queue.createTailer(), comparing, from),
         if (duration == ScanDuration.Finite)
           NoPollingReader else
           PollingReader
@@ -144,7 +146,10 @@ object TimeLog {
     }
 
     // Binary search code taken from net.openhft.chronicle.queue.impl.single.BinarySearch
-    def moveToTime(tailer: ExcerptTailer, time: Long)(implicit de: Decoder[T]): ExcerptTailer = {
+    def _search[U <: Ordered[U]](tailer: ExcerptTailer,
+                                 comparing: T => U,
+                                 key: U)
+                                (implicit de: Decoder[T]): ExcerptTailer = {
       val start = tailer.toStart.index
       val end = tailer.toEnd.index
       val rollCycle: RollCycle = queue.rollCycle
@@ -171,7 +176,7 @@ object TimeLog {
           if (dc.isEmpty)
             return -1
 
-          val compare = decode(dc.get).right.get.time.compareTo(time)
+          val compare = comparing(decode(dc.get).right.get).compare(key)
           if (compare < 0)
             lowSeqNum = midSeqNum + 1
           else if (compare > 0)
@@ -197,7 +202,7 @@ object TimeLog {
           if (!b)
             return prevIndex
 
-          val compare = decode(tailer.readText).right.get.time.compareTo(time)
+          val compare = comparing(decode(tailer.readText).right.get).compare(key)
           if (compare == 0) {
             return compare
           } else if (compare > 0) {

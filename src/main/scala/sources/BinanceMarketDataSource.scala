@@ -45,7 +45,7 @@ class BinanceMarketDataSource extends DataSource {
       // Create one set of TimeLogs per product
       .via(initResource(md => (
         timeLog[DepthUpdateEvent](dataDir, md._1.product, md._1.dataType + "/events"),
-        timeLog[AggBookMD](dataDir, md._1.product, md._1.dataType + "/snapshots")
+        timeLog[AggSnapshot](dataDir, md._1.product, md._1.dataType + "/snapshots")
       )))
 
       // Keep count of events
@@ -59,7 +59,7 @@ class BinanceMarketDataSource extends DataSource {
 
           // Occasionally save the full state as a snapshot
           if (index % SNAPSHOT_INTERVAL == 0)
-            snapshotsLog.enqueue(book)
+            snapshotsLog.enqueue(AggSnapshot(event.u, book))
       }).run
 
     val depthUpdateStream = Source
@@ -127,14 +127,46 @@ class BinanceMarketDataSource extends DataSource {
                       timeRange: core.TimeRange): Unit = {
     val ref = Source.actorRef(Int.MaxValue, OverflowStrategy.fail).to(sink).run
     parseBuiltInDataType(dataType) match {
+
       case Some(DepthBook(BOOK_DEPTH)) =>
+        val eventsLog =
+          timeLog[DepthUpdateEvent](dataDir, parseProductId(topic), dataType + "/events")
+        val snapshotsLog =
+          timeLog[AggSnapshot](dataDir, parseProductId(topic), dataType + "/snapshots")
+
+        // Find the snapshot
+        var state: Option[AggSnapshot] = None
+        snapshotsLog.scanBackwards { book =>
+          state = Some(book)
+          false
+        }
+
+        if (state.isDefined) {
+          eventsLog.scan(state.get.lastUpdateId + 1, _.u) { event =>
+            val prevState = state
+            val key = prevState.get.lastUpdateId + 1
+            val foundNextEvent = event.U <= key && event.u >= key
+            if (foundNextEvent) {
+              state = Some(AggSnapshot(event.u, prevState.get.book.copy(
+                time = event.E * 1000000,
+                data = applyPricePoints(prevState.get.book.data, event.b, event.a)
+              )))
+              ref ! state.get.book
+            }
+            foundNextEvent
+          }
+        }
+
+        eventsLog.close()
+        snapshotsLog.close()
+        ref ! Status.Success
 
       case Some(DepthBook(x)) =>
         throw new RuntimeException(s"Invalid depth: $x")
 
       case Some(Trades) =>
         val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
-        tradesLog.scan(timeRange.from) { md =>
+        tradesLog.scan(timeRange.from, _.time) { md =>
           ref ! md
           timeRange.to.forall(md.time < _)
         }
@@ -254,7 +286,7 @@ class BinanceMarketDataSource extends DataSource {
         buffer.dequeue match { case (event, newBuffer) =>
           if (lastUpdateId.forall(_ < event.u)) {
             state = state.map(book => applyPricePoints(book, event.b, event.a))
-            updateFn(AggBookMD(SRC, product.toString, event.E, state.get))
+            updateFn(AggBookMD(SRC, product.toString, event.E * 1000000, state.get))
           }
           buffer = newBuffer
         }
@@ -327,4 +359,6 @@ class BinanceMarketDataSource extends DataSource {
   case class DepthSnapshotBody(lastUpdateId: Long,
                                bids: Seq[Seq[Json]],
                                asks: Seq[Seq[Json]])
+
+  case class AggSnapshot(lastUpdateId: Long, book: AggBookMD)
 }

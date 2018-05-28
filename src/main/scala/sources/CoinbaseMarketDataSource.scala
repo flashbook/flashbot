@@ -101,34 +101,35 @@ class CoinbaseMarketDataSource extends DataSource {
           val snapshotQueue: TimeLog[SnapshotItem] =
             timeLog(dataDir, parseProductId(topic), "book/snapshots")
 
-          // Read the snapshots queue backwards until we get the latest snapshot in memory.
-          var snapSeq: Option[Queue[SnapshotOrder]] = None
-          snapshotQueue.scanBackwards { item => (snapSeq, item) match {
+          // Read the snapshots queue backwards until we can build up the latest snapshot.
+          var snapOrders: Option[Queue[SnapshotOrder]] = None
+          snapshotQueue.scanBackwards { item => (snapOrders, item) match {
             case (None, SnapshotItem(order, time, index, total))
                 if index == total && time >= from && to.forall(_ > time) =>
-              snapSeq = Some(Queue.empty.enqueue(order))
+              snapOrders = Some(Queue.empty.enqueue(order))
               true
             case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
-              snapSeq = Some(snapshotOrders.enqueue(order))
+              snapOrders = Some(snapshotOrders.enqueue(order))
               false
             case (Some(snapshotOrders), SnapshotItem(order, _, _, _)) =>
-              snapSeq = Some(snapshotOrders.enqueue(order))
+              snapOrders = Some(snapshotOrders.enqueue(order))
               true
             case (None, _) =>
               true
           }}
 
-          if (snapSeq.isDefined) {
+          if (snapOrders.isDefined) {
+            val seq = snapOrders.get.head.seq
             var state = OrderBookMD[APIOrderEvent](NAME, topic)
-              .addSnapshot(snapSeq.get.head.seq, snapSeq.get)
-            eventsQueue.scan(from) { event =>
+              .addSnapshot(snapOrders.get.head.seq, snapOrders.get)
+            eventsQueue.scan(seq + 1, _.seq) { event =>
               val prevState = state
-              if (event.seq == prevState.seq + 1) {
+              val foundNextEvent = event.seq == prevState.seq + 1
+              if (foundNextEvent) {
                 state = prevState.addEvent(event)
                 ref ! state
               }
-
-              (event.seq - 1) <= prevState.seq
+              foundNextEvent
             }
           }
 
@@ -140,7 +141,7 @@ class CoinbaseMarketDataSource extends DataSource {
           val tradesQueue: TimeLog[TradeMD] =
             timeLog(dataDir, parseProductId(topic), "trades")
 
-          tradesQueue.scan(from) { md =>
+          tradesQueue.scan(from, _.time) { md =>
             ref ! md
             to.forall(md.time < _)
           }
