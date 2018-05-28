@@ -16,7 +16,6 @@ import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import core.Utils._
 import core.{Bid, Ask}
 import data.TimeLog
-import data.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import io.circe.syntax._
@@ -27,8 +26,9 @@ import scala.util.{Failure, Success}
 
 class BinanceMarketDataSource extends DataSource {
 
-  val NAME = "binance"
-  val snapshotInterval = 100000
+  val SRC = "binance"
+  val MAX_PRODUCTS = 10000
+  val SNAPSHOT_INTERVAL = 100000
 
   override def ingest(dataDir: String,
                       topics: Map[String, Json],
@@ -38,7 +38,7 @@ class BinanceMarketDataSource extends DataSource {
 
     val aggBookStream = Source
       .actorRef[(AggBookMD, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
-      .groupBy(10000, _._1.product)
+      .groupBy(MAX_PRODUCTS, _._1.product)
 
       // Create one TimeLog per product
       .via(initResource(md => timeLog[AggBookMD](dataDir, md._1.product, md._1.dataType)))
@@ -50,7 +50,7 @@ class BinanceMarketDataSource extends DataSource {
 
     val depthUpdateStream = Source
       .actorRef[(Pair, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
-      .groupBy(10000, _._1)
+      .groupBy(MAX_PRODUCTS, _._1)
 
       // At times, depth updates will be coming in from two different web sockets. This is
       // overlap is OK as long as the "u" field (last update id) of the merged stream keeps
@@ -67,7 +67,7 @@ class BinanceMarketDataSource extends DataSource {
 
     val tradeStream = Source
       .actorRef[TradeMD](Int.MaxValue, OverflowStrategy.fail)
-      .groupBy(10000, _.product)
+      .groupBy(MAX_PRODUCTS, _.product)
 
       // De-dupe trades. Duplicates occur due to WebSocket rotation in the trade provider.
       .via(deDupeStream(_.data.id.toLong))
@@ -96,7 +96,7 @@ class BinanceMarketDataSource extends DataSource {
             new BinanceEventsProvider[TradeEvent](
               "trade",
               topics.keySet.map(parseProductId),
-              (product, t) => tradeStream ! TradeMD(NAME, product.toString,
+              (product, t) => tradeStream ! TradeMD(SRC, product.toString,
                 Trade(t.t.toString, t.T * 1000000, t.p.toDouble, t.q.toDouble))
             )
           ))
@@ -198,30 +198,29 @@ class BinanceMarketDataSource extends DataSource {
         if (!hasRequestedSnapshot) {
           hasRequestedSnapshot = true
           getSnapshot onComplete {
-            case Success(snapshot) => self ! _
+            case Success(snapshot) => self ! snapshot
             case Failure(err) => throw err
           }
-        } else {
-          // Otherwise, flush
+        } else if (state.isDefined) {
+          // Otherwise flush if we already have a state
           flushBuffer()
         }
 
       case DepthSnapshotBody(lastUpdateId, bids, asks) =>
         // Turn the depth snapshot into the first state
-        val bidsOnly = bids.foldLeft(AggBook(1000))((memo, point) =>
-          memo.updateLevel(Bid, parsePricePoint(point)._1, parsePricePoint(point)._2))
-        val bidsAndAsks = asks.foldLeft(bidsOnly)((memo, point) =>
-          memo.updateLevel(Ask, parsePricePoint(point)._1, parsePricePoint(point)._2))
-        state = Some(bidsAndAsks)
+        state = Some(applyPricePoints(AggBook(1000), bids, asks))
 
         // Now replay all events in buffer, dropping ones that occurred before the snapshot.
         flushBuffer(Some(lastUpdateId))
-
     }
 
     private def flushBuffer(lastUpdateId: Option[Long] = None): Unit = {
       while (buffer.nonEmpty) {
         buffer.dequeue match { case (event, newBuffer) =>
+          if (lastUpdateId.forall(_ < event.u)) {
+            state = state.map(book => applyPricePoints(book, event.b, event.a))
+            updateFn(AggBookMD(SRC, product.toString, event.E, state.get))
+          }
           buffer = newBuffer
         }
       }
@@ -238,10 +237,21 @@ class BinanceMarketDataSource extends DataSource {
    */
 
   private def timeLog[T](dataDir: String, product: Pair, name: String) =
-    TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
+    TimeLog[T](new File(s"$dataDir/$SRC/$product/$name"))
 
   private def parsePricePoint(point: Seq[Json]): (Double, Double) =
     (point.head.asString.get.toDouble, point(1).asString.get.toDouble)
+
+  private def applyPricePoints(book: AggBook,
+                               bids: Seq[Seq[Json]],
+                               asks: Seq[Seq[Json]]): AggBook = {
+    val bidsOnly = bids.foldLeft(book)((memo, point) =>
+      memo.updateLevel(Bid, parsePricePoint(point)._1, parsePricePoint(point)._2))
+    val bidsAndAsks = asks.foldLeft(bidsOnly)((memo, point) =>
+      memo.updateLevel(Ask, parsePricePoint(point)._1, parsePricePoint(point)._2))
+    bidsAndAsks
+  }
+
 
   /*
    * Data formats of WebSocket and API responses
