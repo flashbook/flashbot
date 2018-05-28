@@ -109,37 +109,57 @@ object TimeLog {
 //      result
 //    }
 
-    def scanBackwards(handler: T => Boolean): Unit = {
-      _scan(
-        handler,
-        queue.createTailer
-          .direction(TailerDirection.BACKWARD)
-          .toEnd,
-        NoPollingReader
-      )
+    class TimeLogIterator(tailer: ExcerptTailer,
+                          shouldContinue: T => Boolean,
+                          reader: NextMsgReader)
+                         (onComplete: () => Unit = () => {})
+                         (implicit de: Decoder[T]) extends Iterator[T] {
+
+      private var _next: Option[T] = None
+
+      override def hasNext: Boolean = {
+        _next = reader
+          .read(tailer, pauser)
+          .map(decode)
+          .map(_.right.get)
+        val _hasNext = _next.isDefined && shouldContinue(_next.get)
+        if (!_hasNext) {
+          onComplete()
+        }
+        _hasNext
+      }
+
+      override def next: T = _next.get
     }
+
+    def scanBackwards(shouldContinue: T => Boolean)
+                     (onComplete: () => Unit = () => {})
+                     (implicit de: Decoder[T]): Iterator[T] =
+      new TimeLogIterator(
+        queue.createTailer.direction(TailerDirection.BACKWARD).toEnd,
+        shouldContinue,
+        NoPollingReader
+      )(onComplete)
 
     def scan[U <: Ordered[U]](from: U,
                               comparing: T => U,
+                              shouldContinue: T => Boolean,
                               duration: ScanDuration = ScanDuration.Finite)
-                             (handler: T => Boolean)
-                             (implicit de: Decoder[T]): Unit = {
-      _scan(
-        msg => handler(msg),
+                             (onComplete: () => Unit = () => {})
+                             (implicit de: Decoder[T]): Iterator[T] =
+      new TimeLogIterator(
         _search(queue.createTailer(), comparing, from),
-        if (duration == ScanDuration.Finite)
-          NoPollingReader else
-          PollingReader
-      )
-    }
+        shouldContinue,
+        if (duration == ScanDuration.Finite) NoPollingReader else PollingReader
+      )(onComplete)
 
-    private def _scan(handler: T => Boolean, tailer: ExcerptTailer, reader: NextMsgReader)
-                     (implicit de: Decoder[T]): Unit = {
-      var msg: Option[String] = reader.read(tailer, pauser)
-      while (msg.isDefined) {
-        msg = if (handler(decode(msg.get).right.get)) reader.read(tailer, pauser) else None
-      }
-    }
+//    private def _scan(handler: T => Boolean, tailer: ExcerptTailer, reader: NextMsgReader)
+//                     (implicit de: Decoder[T]): Unit = {
+//      var msg: Option[String] = reader.read(tailer, pauser)
+//      while (msg.isDefined) {
+//        msg = if (handler(decode(msg.get).right.get)) reader.read(tailer, pauser) else None
+//      }
+//    }
 
     def close(): Unit = {
       queue.close()

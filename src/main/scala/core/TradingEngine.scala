@@ -6,6 +6,7 @@ import io.circe.Json
 import java.util.UUID
 
 import TradingSession._
+import akka.stream.scaladsl.Source
 import core.Action._
 import core.Order.{Buy, Fill, Sell}
 
@@ -15,7 +16,8 @@ import scala.collection.immutable.Queue
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
   * logging, errors, validation, bot monitoring, order execution, and persistence.
   */
-class TradingEngine(strategyClassNames: Map[String, String],
+class TradingEngine(dataDir: String,
+                    strategyClassNames: Map[String, String],
                     dataSourceClassNames: Map[String, String],
                     exchangeClassNames: Map[String, String])
   extends PersistentActor with ActorLogging {
@@ -199,10 +201,11 @@ class TradingEngine(strategyClassNames: Map[String, String],
         .groupBy(_.srcKey)
         .flatMap { case (key, addresses) =>
           addresses.map { case Address(_, topic, dataType) =>
-            dataSources(key).stream(topic, dataType, mode match {
-              case Backtest(range) => range
-              case _ => TimeRange()
-            })
+            Source.fromIterator[MarketData](() =>
+              dataSources(key).stream(dataDir, topic, dataType, mode match {
+                case Backtest(range) => range
+                case _ => TimeRange()
+              }))
           }}
         .reduce(mode match {
           case Backtest(range) => _.mergeSorted(_)
@@ -242,7 +245,6 @@ class TradingEngine(strategyClassNames: Map[String, String],
                   })
               }
 
-              // Lorde, Lorde, Lorde .... I am Lorde
               newBalances = fills.foldLeft(newBalances) {
                 case (bs, Fill(_, _, fee, Pair(base, quote), price, size, _, _, Buy)) =>
                   bs + (

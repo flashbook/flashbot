@@ -13,11 +13,10 @@ abstract class DataSource {
             (implicit sys: ActorSystem,
              mat: ActorMaterializer)
 
-  def stream(sink: Sink[MarketData, NotUsed],
-             dataDir: String,
+  def stream(dataDir: String,
              topic: String,
              dataType: String,
-             timeRange: TimeRange): Unit
+             timeRange: TimeRange): Iterator[MarketData]
 }
 
 object DataSource {

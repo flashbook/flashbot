@@ -88,66 +88,57 @@ class CoinbaseMarketDataSource extends DataSource {
       Subscribe(topics.keySet.map(parseProductId))
   }
 
-  override def stream(sink: Sink[MarketData, NotUsed], dataDir: String, topic: String,
-                      dataType: String, timeRange: TimeRange): Unit = {
-    val ref = Source.actorRef(Int.MaxValue, OverflowStrategy.fail).to(sink).run
+  override def stream(dataDir: String, topic: String,
+                      dataType: String, timeRange: TimeRange): Iterator[MarketData] = {
 
     parseBuiltInDataType(dataType) match {
       case Some(x) => (x, timeRange) match {
 
         case (FullBook, TimeRange(from, to)) =>
-          val eventsQueue: TimeLog[APIOrderEvent] =
-            timeLog(dataDir, parseProductId(topic), "book/events")
           val snapshotQueue: TimeLog[SnapshotItem] =
             timeLog(dataDir, parseProductId(topic), "book/snapshots")
 
           // Read the snapshots queue backwards until we can build up the latest snapshot.
           var snapOrders: Option[Queue[SnapshotOrder]] = None
-          snapshotQueue.scanBackwards { item => (snapOrders, item) match {
-            case (None, SnapshotItem(order, time, index, total))
+          for (item <- snapshotQueue
+              .scanBackwards(_.index != 1 || snapOrders.isEmpty)(snapshotQueue.close)) {
+            (snapOrders, item) match {
+              case (None, SnapshotItem(order, time, index, total))
                 if index == total && time >= from && to.forall(_ > time) =>
-              snapOrders = Some(Queue.empty.enqueue(order))
-              true
-            case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
-              snapOrders = Some(snapshotOrders.enqueue(order))
-              false
-            case (Some(snapshotOrders), SnapshotItem(order, _, _, _)) =>
-              snapOrders = Some(snapshotOrders.enqueue(order))
-              true
-            case (None, _) =>
-              true
-          }}
+                snapOrders = Some(Queue.empty.enqueue(order))
+              case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
+                snapOrders = Some(snapshotOrders.enqueue(order))
+              case (Some(snapshotOrders), SnapshotItem(order, _, _, _)) =>
+                snapOrders = Some(snapshotOrders.enqueue(order))
+              case _ =>
+            }
+          }
 
           if (snapOrders.isDefined) {
+            val eventsQueue: TimeLog[APIOrderEvent] =
+              timeLog(dataDir, parseProductId(topic), "book/events")
             val seq = snapOrders.get.head.seq
             var state = OrderBookMD[APIOrderEvent](NAME, topic)
               .addSnapshot(snapOrders.get.head.seq, snapOrders.get)
-            eventsQueue.scan(seq + 1, _.seq) { event =>
+
+            for (event <- eventsQueue.scan(seq + 1, _.seq, { event =>
               val prevState = state
               val foundNextEvent = event.seq == prevState.seq + 1
               if (foundNextEvent) {
                 state = prevState.addEvent(event)
-                ref ! state
               }
               foundNextEvent
-            }
-          }
+            })(eventsQueue.close))
+              yield state
 
-          eventsQueue.close()
-          snapshotQueue.close()
-          ref ! Status.Success
+          } else {
+            List().iterator
+          }
 
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue: TimeLog[TradeMD] =
             timeLog(dataDir, parseProductId(topic), "trades")
-
-          tradesQueue.scan(from, _.time) { md =>
-            ref ! md
-            to.forall(md.time < _)
-          }
-
-          tradesQueue.close()
-          ref ! Status.Success
+          tradesQueue.scan(from, _.time, md => to.forall(md.time < _))(tradesQueue.close)
 
         case (DepthBook(_), _) =>
           throw new RuntimeException(s"Coinbase order book aggregations not yet implemented")
