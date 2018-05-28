@@ -16,7 +16,7 @@ import core.Order.{OrderType, Side}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
 import core.Utils.{ISO8601ToMicros, parseJson, parseProductId}
 import data.OrderBookProvider.Subscribe
-import data.TimeLog.{TimeLog, QueueBound}
+import data.TimeLog.TimeLog
 import data.{OrderBookProvider, TimeLog}
 import io.circe.Json
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
@@ -47,9 +47,9 @@ class CoinbaseMarketDataSource extends DataSource {
             Long, Option[OrderBookMD[APIOrderEvent]])]((None, -1, None)) {
         case ((queueOpt, count, prev), book) =>
           (Some(queueOpt.getOrElse((
-            queue[APIOrderEvent](dataDir, book.product, "book/events"),
-            queue[SnapshotItem](dataDir, book.product, "book/snapshots"),
-            queue[TradeMD](dataDir, book.product, "trades")))),
+            timeLog[APIOrderEvent](dataDir, book.product, "book/events"),
+            timeLog[SnapshotItem](dataDir, book.product, "book/snapshots"),
+            timeLog[TradeMD](dataDir, book.product, book.dataType)))),
           count + 1,
           Some(book))
       }
@@ -93,33 +93,36 @@ class CoinbaseMarketDataSource extends DataSource {
                       dataType: String, timeRange: TimeRange): Unit = {
     val ref = Source.actorRef(Int.MaxValue, OverflowStrategy.fail).to(sink).run
 
-    // TODO: Full table scans :( Remove them using Chronicle Queue indices
     parseBuiltInDataType(dataType) match {
       case Some(x) => (x, timeRange) match {
 
         case (FullBook, TimeRange(from, to)) =>
           val eventsQueue: TimeLog[APIOrderEvent] =
-            queue(dataDir, parseProductId(topic), "book/events")
+            timeLog(dataDir, parseProductId(topic), "book/events")
           val snapshotQueue: TimeLog[SnapshotItem] =
-            queue(dataDir, parseProductId(topic), "book/snapshots")
+            timeLog(dataDir, parseProductId(topic), "book/snapshots")
 
           // Read the snapshots queue backwards until we get the latest snapshot in memory.
-          val snapSeq = snapshotQueue.reduceWhile[Option[Queue[SnapshotOrder]]]({
+          var snapSeq: Option[Queue[SnapshotOrder]] = None
+          snapshotQueue.scanBackwards { item => (snapSeq, item) match {
             case (None, SnapshotItem(order, time, index, total))
-              if index == total && time >= from && to.forall(_ > time) =>
-              (Some(Queue.empty.enqueue(order)), true)
+                if index == total && time >= from && to.forall(_ > time) =>
+              snapSeq = Some(Queue.empty.enqueue(order))
+              true
             case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
-              (Some(snapshotOrders.enqueue(order)), false)
+              snapSeq = Some(snapshotOrders.enqueue(order))
+              false
             case (Some(snapshotOrders), SnapshotItem(order, _, _, _)) =>
-              (Some(snapshotOrders.enqueue(order)), true)
+              snapSeq = Some(snapshotOrders.enqueue(order))
+              true
             case (None, _) =>
-              (None, true)
-          }, None, QueueBound.End, TailerDirection.BACKWARD)
+              true
+          }}
 
           if (snapSeq.isDefined) {
             var state = OrderBookMD[APIOrderEvent](NAME, topic)
               .addSnapshot(snapSeq.get.head.seq, snapSeq.get)
-            eventsQueue.scan({ event =>
+            eventsQueue.scan(from) { event =>
               val prevState = state
               if (event.seq == prevState.seq + 1) {
                 state = prevState.addEvent(event)
@@ -127,7 +130,7 @@ class CoinbaseMarketDataSource extends DataSource {
               }
 
               (event.seq - 1) <= prevState.seq
-            })
+            }
           }
 
           eventsQueue.close()
@@ -136,11 +139,13 @@ class CoinbaseMarketDataSource extends DataSource {
 
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue: TimeLog[TradeMD] =
-            queue(dataDir, parseProductId(topic), "trades")
-          tradesQueue.scan({ md =>
-            if (md.time >= from) ref ! md
+            timeLog(dataDir, parseProductId(topic), "trades")
+
+          tradesQueue.scan(from) { md =>
+            ref ! md
             to.forall(md.time < _)
-          })
+          }
+
           tradesQueue.close()
           ref ! Success
 
@@ -152,7 +157,7 @@ class CoinbaseMarketDataSource extends DataSource {
     }
   }
 
-  private def queue[T](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T](dataDir: String, product: Pair, name: String) =
     TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**

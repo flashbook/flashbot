@@ -3,6 +3,8 @@ package core
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
+import akka.NotUsed
+import akka.stream.scaladsl.Flow
 import io.circe.Decoder
 import io.circe.parser._
 
@@ -31,4 +33,16 @@ object Utils {
         }
     }
   }
+
+  def initResource[R, E](build: E => R): Flow[E, (R, E), NotUsed] =
+    Flow[E].scan[Option[(R, E)]](None) {
+      case (None, ev) => Some(build(ev), ev)
+      case (Some((resource, _)), ev) => Some(resource, ev)
+    }.map(_.get)
+
+  def deDupeStream[T](seqFn: T => Long): Flow[T, T, NotUsed] = Flow[T]
+    .scan[(Long, Option[T])]((-1, None)) {
+    case ((seq, _), event) if seqFn(event) > seq => (seqFn(event), Some(event))
+    case ((seq, _), _) => (seq, None)
+  }.collect { case (_, Some(event)) => event }
 }

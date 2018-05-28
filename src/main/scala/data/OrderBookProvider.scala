@@ -2,7 +2,6 @@ package data
 
 import akka.actor.Actor
 import akka.event.Logging
-import core.MarketData.Timestamped
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
 import core.{OrderEvent, Pair, RawOrderEvent}
 

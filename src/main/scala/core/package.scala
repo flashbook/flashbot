@@ -1,4 +1,5 @@
 import core.MarketData.GenMD
+import core.Utils.parseProductId
 
 package object core {
 
@@ -34,6 +35,7 @@ package object core {
   case class TradeMD(source: String, topic: String, data: Trade) extends GenMD[Trade] {
     val dataType: String = "trades"
     def time: Long = data.time
+    def product: Pair = parseProductId(topic)
   }
 
   case class CurrencyConfig(name: Option[String],
@@ -45,4 +47,8 @@ package object core {
   object Timestamped {
     val ordering: Ordering[Timestamped] = Ordering.by(_.time)
   }
+
+  sealed trait QuoteSide
+  case object Bid extends QuoteSide
+  case object Ask extends QuoteSide
 }

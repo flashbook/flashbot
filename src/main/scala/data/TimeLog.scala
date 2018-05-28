@@ -93,35 +93,38 @@ object TimeLog {
     }
 
     // A scan that accumulates a value as it iterates.
-    def reduceWhile[A](handler: (A, T) => (A, Boolean),
+    def reduceWhile[A](from: Long,
                        zero: A,
-                       from: Long = 0,
-                       duration: ScanDuration = ScanDuration.Finite)
+                       duration: ScanDuration = ScanDuration.Finite,
+                       handler: (A, T) => (A, Boolean))
                       (implicit de: Decoder[T]): A = {
 
       var result: A = zero
-      scan(
-        handler = msg => {
-          val (newResult, shouldContinue) = handler(result, msg)
-          result = newResult
-          shouldContinue
-        },
-        from,
-        duration
-      )
+      scan(from, duration) { msg =>
+        val (newResult, shouldContinue) = handler(result, msg)
+        result = newResult
+        shouldContinue
+      }
       result
     }
 
-    // By default, scans the entire table once in order.
-    def scan(handler: T => Boolean,
-             from: Long = 0,
+    def scanBackwards(handler: T => Boolean): Unit = {
+      _scan(
+        handler,
+        queue.createTailer
+          .direction(TailerDirection.BACKWARD)
+          .toEnd,
+        NoPollingReader
+      )
+    }
+
+    def scan(from: Long,
              duration: ScanDuration = ScanDuration.Finite)
+            (handler: T => Boolean)
             (implicit de: Decoder[T]): Unit = {
-      val tailer: ExcerptTailer = queue.createTailer()
-      moveToTime(tailer, from)
       _scan(
         msg => handler(msg),
-        tailer,
+        moveToTime(queue.createTailer(), from),
         if (duration == ScanDuration.Finite)
           NoPollingReader else
           PollingReader
@@ -141,7 +144,7 @@ object TimeLog {
     }
 
     // Binary search code taken from net.openhft.chronicle.queue.impl.single.BinarySearch
-    def moveToTime(tailer: ExcerptTailer, time: Long)(implicit de: Decoder[T]): Unit = {
+    def moveToTime(tailer: ExcerptTailer, time: Long)(implicit de: Decoder[T]): ExcerptTailer = {
       val start = tailer.toStart.index
       val end = tailer.toEnd.index
       val rollCycle: RollCycle = queue.rollCycle
@@ -221,6 +224,7 @@ object TimeLog {
         case -1 => 0
         case x => math.abs(x)
       })
+      tailer
     }
   }
 }
