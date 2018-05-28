@@ -40,12 +40,24 @@ class BinanceMarketDataSource extends DataSource {
       .actorRef[(AggBookMD, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(MAX_PRODUCTS, _._1.product)
 
-      // Create one TimeLog per product
-      .via(initResource(md => timeLog[AggBookMD](dataDir, md._1.product, md._1.dataType)))
+      // Create one set of TimeLogs per product
+      .via(initResource(md => (
+        timeLog[DepthUpdateEvent](dataDir, md._1.product, md._1.dataType + "/events"),
+        timeLog[AggBookMD](dataDir, md._1.product, md._1.dataType + "/snapshots")
+      )))
+
+      // Keep count of events
+      .via(withIndex)
 
       // Persist books
       .to(Sink.foreach {
-        case _ => ???
+        case (index, ((eventsLog, snapshotsLog), (book, event))) =>
+          // Always save the event
+          eventsLog.enqueue(event)
+
+          // Occasionally save the full state as a snapshot
+          if (index % SNAPSHOT_INTERVAL == 0)
+            snapshotsLog.enqueue(book)
       }).run
 
     val depthUpdateStream = Source

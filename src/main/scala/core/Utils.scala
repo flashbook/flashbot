@@ -45,4 +45,8 @@ object Utils {
     case ((seq, _), event) if seqFn(event) > seq => (seqFn(event), Some(event))
     case ((seq, _), _) => (seq, None)
   }.collect { case (_, Some(event)) => event }
+
+  def withIndex[T]: Flow[T, (Long, T), NotUsed] = Flow[T]
+    .scan[(Long, Option[T])]((-1, None))((count, e) => (count._1 + 1, Some(e)))
+    .map(e => (e._1, e._2.get))
 }
