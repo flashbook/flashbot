@@ -22,11 +22,6 @@ object TimeLog {
   }
 
   class ResourceManager extends StoreFileListener {
-    override def onAcquired(cycle: Int, file: File): Unit = {
-      super.onAcquired(cycle, file)
-      println("file acquired", cycle, file)
-    }
-
     override def onReleased(cycle: Int, file: File): Unit = {
       // TODO: Do retention things here
       println("file released", cycle, file)
@@ -74,12 +69,10 @@ object TimeLog {
         math.floor(inFlightMessage.get.micros.toDouble / 1000).toLong
     }
 
-    println("creating time log", path)
-
     private val queue = SingleChronicleQueueBuilder
       .binary(path)
       .rollCycle(RollCycles.DAILY)
-//      .timeProvider(TimestampProvider)
+      .timeProvider(TimestampProvider)
       .storeFileListener(defaultResourceManager)
       .build()
 

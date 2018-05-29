@@ -6,8 +6,8 @@ target
 *.db
 *.iml
 .DS_Store
-flash_data
-flash_logs
+flashbot_data
+flashbot_logs
 
 
 # dependencies

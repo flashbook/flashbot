@@ -113,7 +113,7 @@ class BinanceMarketDataSource extends DataSource {
               topics.keySet.map(parseProductId),
               (product, t) =>
                 tradeStream ! TradeMD(SRC, product.toString,
-                  Trade(t.t.toString, t.T * 1000000, t.p.toDouble, t.q.toDouble))
+                  Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble))
             )
           ))
 
@@ -147,7 +147,7 @@ class BinanceMarketDataSource extends DataSource {
             val foundNextEvent = event.U <= key && event.u >= key
             if (foundNextEvent) {
               state = Some(AggSnapshot(event.u, prevState.get.book.copy(
-                micros = event.E * 1000000,
+                micros = event.micros,
                 data = applyPricePoints(prevState.get.book.data, event.b, event.a)
               )))
             }
@@ -334,7 +334,7 @@ class BinanceMarketDataSource extends DataSource {
         buffer.dequeue match { case (event, newBuffer) =>
           if (lastUpdateId.forall(_ < event.u)) {
             state = state.map(book => applyPricePoints(book, event.b, event.a))
-            updateFn(AggBookMD(SRC, product.toString, event.E * 1000000, state.get))
+            updateFn(AggBookMD(SRC, product.toString, event.micros, state.get))
           }
           buffer = newBuffer
         }
