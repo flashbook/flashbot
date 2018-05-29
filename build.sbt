@@ -24,7 +24,8 @@ lazy val akkaDeps = List(
   "com.typesafe.akka" %% "akka-persistence" % akkaVersion,
   "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8",
 
-  "com.github.andyglow" %% "websocket-scala-client" % "0.2.4" % Compile,
+//  "com.github.andyglow" %% "websocket-scala-client" % "0.2.4" % Compile,
+  "org.java-websocket" % "Java-WebSocket" % "1.3.8",
 
   "de.heikoseeberger" %% "akka-http-circe" % "1.20.0"
 )

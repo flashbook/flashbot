@@ -1,15 +1,16 @@
 package sources
 
 import java.io.File
+import java.net.URI
 
 import akka.NotUsed
-import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
-import com.github.andyglow.websocket.{Websocket, WebsocketClient}
+import org.java_websocket.client.WebSocketClient
 import core.AggBook._
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import core.Utils._
@@ -18,7 +19,9 @@ import data.TimeLog
 import data.TimeLog.TimeLog
 import io.circe.{Decoder, Json}
 import io.circe.generic.auto._
-import io.circe.syntax._
+import org.java_websocket.WebSocket
+import org.java_websocket.framing.Framedata
+import org.java_websocket.handshake.ServerHandshake
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
@@ -50,15 +53,24 @@ class BinanceMarketDataSource extends DataSource {
       // Keep count of events
       .via(withIndex)
 
+      .recover {
+        case err =>
+          println("error in agg book stream")
+          throw err
+      }
+
       // Persist books
       .to(Sink.foreach {
         case (index, ((eventsLog, snapshotsLog), (book, event))) =>
           // Always save the event
+          println(index, event)
           eventsLog.enqueue(event)
 
           // Occasionally save the full state as a snapshot
-          if (index % SNAPSHOT_INTERVAL == 0)
+          if (index % SNAPSHOT_INTERVAL == 0) {
+            println("saving snapshot")
             snapshotsLog.enqueue(AggSnapshot(event.u, book))
+          }
       }).run
 
     val depthUpdateStream = Source
@@ -75,6 +87,12 @@ class BinanceMarketDataSource extends DataSource {
       .via(initResource(ev =>
           system.actorOf(Props(new AggBookProvider(ev._1, aggBookStream ! (_, ev._2))))))
 
+      .recover {
+        case err =>
+          println("error in depth update stream")
+          throw err
+      }
+
       // Pass along to the agg book provider
       .to(Sink.foreach { case (ref, (_, e: DepthUpdateEvent)) => ref ! e }).run
 
@@ -88,9 +106,17 @@ class BinanceMarketDataSource extends DataSource {
       // Create one TimeLog per product
       .via(initResource(md => timeLog[TradeMD](dataDir, md.product, md.dataType)))
 
+      .recover {
+        case err =>
+          println("error in trade stream")
+          throw err
+      }
+
       // Persist trades
       .to(Sink.foreach {
-        case (timeLog, md) => timeLog.enqueue(md)
+        case (timeLog, md) =>
+          println(md.topic, md.dataType, md.micros)
+          timeLog.enqueue(md)
       }).run
 
     dataTypes
@@ -216,28 +242,29 @@ class BinanceMarketDataSource extends DataSource {
     override def timeMillis: Long = E
   }
 
-
   /**
     * Collects events from the Binance WebSocket API. Rotates WebSocket connections periodically
     * because Binance shuts down single connections that are open for over 24 hours.
     */
   class BinanceEventsProvider[T <: RspBody]
   (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit)
-  (implicit de: Decoder[T]) extends Actor {
+  (implicit de: Decoder[T]) extends Actor with ActorLogging {
 
     implicit val ec: ExecutionContext = context.dispatcher
 
     case class StreamWrap[R <: RspBody](stream: String, data: R)
 
-    private val wsRotatePeriodMillis: Long = 1000 * 60 * 60
+    private val wsRotatePeriodMillis: Long = 1000 * 30
 
     private val symbols = products.foldLeft(Map.empty[String, Pair]) {
       case (memo, pair) => memo + ((pair.base + pair.quote) -> pair)
     }
 
-    var mainWebSocket: Websocket = createClient.open()
-    var tempWebSocket: Option[Websocket] = None
+    var mainWebSocket: WebSocketClient = connect()
+    var tempWebSocket: Option[WebSocketClient] = None
     var lastRotation: Long = -1
+
+    self ! "tick"
 
     override def receive: Receive = {
       // Incoming message from a websocket
@@ -254,7 +281,7 @@ class BinanceMarketDataSource extends DataSource {
             throw new RuntimeException("WebSocket rotation error")
           }
 
-          tempWebSocket = Some(createClient.open())
+          tempWebSocket = Some(connect())
 
           // Swap WebSocket references after a reasonable amount of time
           Future {
@@ -268,24 +295,50 @@ class BinanceMarketDataSource extends DataSource {
           throw new RuntimeException("WebSocket swap error")
         }
 
-        mainWebSocket.close
+        mainWebSocket.closeBlocking()
         mainWebSocket = tempWebSocket.get
         tempWebSocket = None
+        println("Swapped Binance WebSockets")
+
+      case "tick" =>
+        mainWebSocket.sendPing()
+        println("ping")
+        Future {
+          Thread.sleep(4000)
+          self ! "tick"
+        }
     }
 
-    def createClient: WebsocketClient[String] = {
-      val url = "wss://stream.binance.com:9443/stream?streams=" +
-        symbols.keySet.map(_ + "@" + streamName).mkString("/")
-      println(url)
-      WebsocketClient[String](url) {
-        case str =>
-          parseJson[StreamWrap[T]](str) match {
+    def connect(): WebSocketClient = {
+      val client = new WebSocketClient(new URI(
+        "wss://stream.binance.com:9443/stream?streams=" +
+          symbols.keySet.map(_ + "@" + streamName).mkString("/")
+      )) {
+        override def onOpen(handshakedata: ServerHandshake): Unit = {}
+
+        override def onMessage(message: String): Unit = {
+          parseJson[StreamWrap[T]](message) match {
             case Right(wrap) =>
               self ! wrap
+
             case Left(a) =>
               throw new RuntimeException(a)
           }
+        }
+
+        override def onClose(code: Int, reason: String, remote: Boolean): Unit = {}
+
+        override def onError(ex: Exception): Unit = {
+          throw ex
+        }
+
+        override def onWebsocketPong(conn: WebSocket, f: Framedata): Unit = {
+          super.onWebsocketPong(conn, f)
+          println("pong")
+        }
       }
+      client.connectBlocking()
+      client
     }
   }
 
@@ -298,7 +351,7 @@ class BinanceMarketDataSource extends DataSource {
     import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
     implicit val ec: ExecutionContext = context.dispatcher
     implicit val system: ActorSystem = context.system
-    implicit val mat: ActorMaterializer = ActorMaterializer()
+    implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
     private var buffer = Queue.empty[DepthUpdateEvent]
     private var hasRequestedSnapshot = false
@@ -322,6 +375,7 @@ class BinanceMarketDataSource extends DataSource {
         }
 
       case DepthSnapshotBody(lastUpdateId, bids, asks) =>
+
         // Turn the depth snapshot into the first state
         state = Some(applyPricePoints(AggBook(BOOK_DEPTH), bids, asks))
 

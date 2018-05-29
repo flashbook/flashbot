@@ -4,6 +4,8 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 
 import akka.NotUsed
+import akka.actor.ActorSystem
+import akka.stream.{ActorMaterializer, ActorMaterializerSettings, Supervision}
 import akka.stream.scaladsl.Flow
 import io.circe.Decoder
 import io.circe.parser._
@@ -50,4 +52,10 @@ object Utils {
     .scan[(Long, Option[T])]((-1, None))((count, e) => (count._1 + 1, Some(e)))
     .drop(1)
     .map(e => (e._1, e._2.get))
+
+  def buildMaterializer(implicit system: ActorSystem): ActorMaterializer =
+    ActorMaterializer(ActorMaterializerSettings(system).withSupervisionStrategy { err =>
+      println(s"Exception in stream: $err")
+      Supervision.Stop
+    })
 }

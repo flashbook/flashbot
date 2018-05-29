@@ -45,6 +45,9 @@
       "data_types": {
         "trades": {
           "retention": "90d"
+        },
+        "book_1000": {
+          "retention": "90d"
         }
       }
     },

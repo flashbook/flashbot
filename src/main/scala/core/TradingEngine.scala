@@ -1,6 +1,6 @@
 package core
 
-import akka.actor.ActorLogging
+import akka.actor.{ActorLogging, ActorSystem}
 import akka.persistence._
 import io.circe.Json
 import java.util.UUID
@@ -24,7 +24,8 @@ class TradingEngine(dataDir: String,
                     exchangeClassNames: Map[String, String])
   extends PersistentActor with ActorLogging {
 
-  implicit val mat: ActorMaterializer = ActorMaterializer()
+  implicit val system: ActorSystem = context.system
+  implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
   import TradingEngine._
   import DataSource._

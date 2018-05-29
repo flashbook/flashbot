@@ -1,20 +1,23 @@
 import scopt.OptionParser
 import java.io.File
+import java.net.URI
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
-import core.{DataSource, Exchange}
+import core.{CurrencyConfig, DataSource, Exchange, Utils}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
-import core.CurrencyConfig
 import data.IngestService
 import io.circe.Json
 import io.circe.generic.auto._
 import io.circe.syntax._
 import io.circe.parser._
 import io.prometheus.client.exporter.HTTPServer
+import org.java_websocket.WebSocket
+import org.java_websocket.framing.Framedata
+import org.java_websocket.handshake.ServerHandshake
 
 import scala.concurrent.ExecutionContext
 import scala.io.Source
@@ -109,11 +112,12 @@ object Main {
         ConfigValueFactory.fromAnyRef(s"${opts.dataPath}/snapshot-store"))
 
     implicit val system: ActorSystem = ActorSystem("flashbot", systemConfig)
-    implicit val mat: Materializer = ActorMaterializer()
+    implicit val mat: Materializer = Utils.buildMaterializer
     implicit val ec: ExecutionContext = system.dispatcher
 
     if (opts.metricsPort != 0)
       metricsServer = Some(new HTTPServer(opts.metricsPort))
+
 
     opts.cmd match {
       case "ingest" =>

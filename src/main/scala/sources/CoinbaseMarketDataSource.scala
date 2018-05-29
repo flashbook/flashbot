@@ -1,6 +1,7 @@
 package sources
 
 import java.io.File
+import java.net.URI
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
@@ -9,7 +10,6 @@ import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Sink, Source}
-import com.github.andyglow.websocket.{Websocket, WebsocketClient}
 import core._
 import core.Order.{OrderType, Side}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
@@ -21,6 +21,8 @@ import io.circe.Json
 import io.circe.generic.auto._
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import net.openhft.chronicle.queue.TailerDirection
+import org.java_websocket.client.WebSocketClient
+import org.java_websocket.handshake.ServerHandshake
 
 import scala.collection.immutable.{Queue, SortedSet}
 import scala.concurrent.Future
@@ -170,7 +172,7 @@ class CoinbaseMarketDataSource extends DataSource {
     import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
     import io.circe.generic.auto._
 
-    var ws: Option[Websocket] = None
+    var ws: Option[WebSocketClient] = None
     var buffers = Map.empty[Pair, (Long, SortedSet[APIOrderEvent])]
     var subscribed = false
 
@@ -218,9 +220,11 @@ class CoinbaseMarketDataSource extends DataSource {
       }
 
       // Open a WebSocket
-      val cli = WebsocketClient[String]("wss://ws-feed.gdax.com") {
-        case msg =>
-          parseJson[UnparsedAPIOrderEvent](msg) match {
+      ws = Some(new WebSocketClient(new URI("wss://ws-feed.gdax.com")) {
+        override def onOpen(handshakedata: ServerHandshake): Unit = {}
+
+        override def onMessage(message: String): Unit = {
+          parseJson[UnparsedAPIOrderEvent](message) match {
             case Right(ev) =>
               if (subscribed)
                 ingestEvent(ev)
@@ -232,13 +236,17 @@ class CoinbaseMarketDataSource extends DataSource {
               // some skipped messages between events received before and after "subscriptions".
               // Therefore we choose to ignore all messages before "subscriptions".
               if (subscribed)
-                // We only expect one parse error, so crash if there are more.
+              // We only expect one parse error, so crash if there are more.
                 crash(err)
               else
                 subscribed = true
           }
-      }
-      ws = Some(cli.open())
+        }
+
+        override def onClose(code: Int, reason: String, remote: Boolean): Unit = {}
+
+        override def onError(ex: Exception): Unit = throw ex
+      })
 
       val s = s"""
            |{
@@ -249,7 +257,7 @@ class CoinbaseMarketDataSource extends DataSource {
         """.stripMargin
 
       // Subscribe on the websocket
-      ws.get ! s
+      ws.get.send(s)
 
     }
   }
