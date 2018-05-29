@@ -2,19 +2,20 @@ package strategies
 
 import core.{BarSize, MarketData, Pair, Strategy, TradingSession}
 import io.circe.Json
+import io.circe.generic.auto._
 
 import scala.util.Random
 
 class OrderRandomly extends Strategy {
 
-  case class Params(exchange: String, market: Pair)
+  case class Params(exchange: String, market: String)
 
   override def title: String = "Random Orders Strategy"
 
   var _params: Option[Params] = None
   val rand = new Random
 
-  override def initialize(params: Json)(implicit ctx: TradingSession): List[String] = {
+  override def initialize(params: Json): List[String] = {
     _params = Some(params.as[Params].right.get)
     List(_params.get.exchange)
   }

@@ -6,7 +6,7 @@ import core.OrderBook.{OrderBookMD, SnapshotOrder}
 import core.{OrderEvent, Pair, RawOrderEvent}
 
 import scala.collection.immutable.Queue
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object OrderBookProvider {
@@ -19,6 +19,8 @@ object OrderBookProvider {
 abstract class OrderBookProvider[E <: RawOrderEvent]
     (source: String, updateFn: OrderBookMD[E] => Unit) extends Actor {
   import OrderBookProvider._
+
+  implicit val ec: ExecutionContext = context.dispatcher
 
   def getSnapshot(product: Pair, first: E): Future[(Long, Seq[SnapshotOrder])]
   def ingest(ps: Set[Pair], onEvent: E => Unit): Unit

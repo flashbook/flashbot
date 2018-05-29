@@ -6,6 +6,8 @@ import io.circe.Json
 import java.util.UUID
 
 import TradingSession._
+import akka.NotUsed
+import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
 import core.Action._
 import core.Order.{Buy, Fill, Sell}
@@ -21,6 +23,8 @@ class TradingEngine(dataDir: String,
                     dataSourceClassNames: Map[String, String],
                     exchangeClassNames: Map[String, String])
   extends PersistentActor with ActorLogging {
+
+  implicit val mat: ActorMaterializer = ActorMaterializer()
 
   import TradingEngine._
   import DataSource._
@@ -87,7 +91,7 @@ class TradingEngine(dataDir: String,
       // Also load exchanges instances while we're at it.
       var dataSources = Map.empty[String, DataSource]
       var _exchanges = Map.empty[String, Exchange]
-      for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet) {
+      for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
         if (!dataSourceClassNames.isDefinedAt(srcKey)) {
           return Left(EngineError(s"Unknown data source: $srcKey"))
         }
@@ -207,7 +211,7 @@ class TradingEngine(dataDir: String,
                 case _ => TimeRange()
               }))
           }}
-        .reduce(mode match {
+        .reduce[Source[MarketData, NotUsed]](mode match {
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
@@ -232,7 +236,7 @@ class TradingEngine(dataDir: String,
               val (fills, userData) = exchange.update(session)
               def acc(currency: String) = Account(data.source, currency)
 
-              (newIds, newActions) = userData.foldLeft((newIds, newActions)) {
+              userData.foldLeft((newIds, newActions)) {
                 case ((is, as), Received(id, _, clientId, _)) =>
                   (is.receivedOrder(clientId.get, id), as)
                 case ((is, as), Open(id, _, _, _, _)) =>
@@ -243,6 +247,9 @@ class TradingEngine(dataDir: String,
                     case Filled => closeTxForOrderId(as, is, id)
                     case _ => as
                   })
+              } match { case (_newIds, _newActions) =>
+                  newIds = _newIds
+                  newActions = _newActions
               }
 
               newBalances = fills.foldLeft(newBalances) {
@@ -261,9 +268,12 @@ class TradingEngine(dataDir: String,
           }
 
           // Send the order targets to the target manager and enqueue the actions emitted by it.
-          (newActions, newTM) = targets.foldLeft((newActions, newTM)) {
+          targets.foldLeft((newActions, newTM)) {
             case ((as, ntm), target) =>
               tm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
+          } match { case (_newActions, _newTM) =>
+              newActions = _newActions
+              newTM = _newTM
           }
 
           def pPair(exName: String, pair: Pair): PortfolioPair =

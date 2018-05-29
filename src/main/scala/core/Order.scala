@@ -9,8 +9,8 @@ object Order {
 
   object Side extends Side {
     def parseSide(str: String): Side = str match {
-      case "sell" => Sell()
-      case "buy" => Buy()
+      case "sell" => Sell
+      case "buy" => Buy
     }
   }
 

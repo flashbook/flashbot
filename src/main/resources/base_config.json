@@ -1,4 +1,5 @@
 {
+  "api_key": "",
   "exchanges": {
     "gdax": {
       "class": "io.flashbook.exchanges.GDAX"
@@ -12,8 +13,8 @@
   },
 
   "data_sources": {
-    "gdax": {
-      "class": "io.flashbook.data.GDAXMarketDataSource",
+    "coinbase": {
+      "class": "sources.CoinbaseMarketDataSource",
       "topics": {
         "btc_usd": {},
         "ltc_usd": {},
@@ -32,7 +33,7 @@
     },
 
     "binance": {
-      "class": "io.flashbook.data.BinanceMarketDataSource",
+      "class": "sources.BinanceMarketDataSource",
       "topics": {
         "btc_usdt": {},
         "ltc_usdt": {},
@@ -49,7 +50,7 @@
     },
 
     "twitter": {
-      "class": "io.flashbook.data.TwitterSearchDataSource",
+      "class": "sources.TwitterSearchDataSource",
       "topics": {
         "btc": {
           "search_terms": ["btc", "#btc", "bitcoin", "#bitcoin", "$btc"]

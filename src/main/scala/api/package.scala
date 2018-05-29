@@ -11,7 +11,6 @@ import io.circe.optics.JsonPath._
 import io.circe.parser._
 import sangria.parser.QueryParser
 import de.heikoseeberger.akkahttpcirce.ErrorAccumulatingCirceSupport._
-import javax.ws.rs.BadRequestException
 import sangria.ast.Document
 import sangria.execution.Executor
 import sangria.schema.Schema

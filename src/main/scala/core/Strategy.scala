@@ -23,7 +23,7 @@ abstract class Strategy {
     * the `handleData` method. Each stream should complete when there is no more data, which auto
     * shuts down the strategy when all data streams complete.
     */
-  def initialize(params: Json)(implicit ctx: TradingSession): List[String]
+  def initialize(params: Json): List[String]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.

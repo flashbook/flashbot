@@ -1,6 +1,7 @@
 package core
 
 import core.Order.{Fill, Side}
+import io.circe.generic.auto._
 
 object Exchange {
   final case class ExchangeConfig(`class`: String)

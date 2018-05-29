@@ -71,13 +71,15 @@ object TimeLog {
     var inFlightMessage: Option[T] = None
     object TimestampProvider extends TimeProvider {
       override def currentTimeMillis: Long =
-        math.floor(inFlightMessage.get.time.toDouble / 1000000).toLong
+        math.floor(inFlightMessage.get.micros.toDouble / 1000).toLong
     }
+
+    println("creating time log", path)
 
     private val queue = SingleChronicleQueueBuilder
       .binary(path)
       .rollCycle(RollCycles.DAILY)
-      .timeProvider(TimestampProvider)
+//      .timeProvider(TimestampProvider)
       .storeFileListener(defaultResourceManager)
       .build()
 
@@ -113,14 +115,14 @@ object TimeLog {
                           shouldContinue: T => Boolean,
                           reader: NextMsgReader)
                          (onComplete: () => Unit = () => {})
-                         (implicit de: Decoder[T]) extends Iterator[T] {
+                         (implicit val de: Decoder[T]) extends Iterator[T] {
 
       private var _next: Option[T] = None
 
       override def hasNext: Boolean = {
         _next = reader
           .read(tailer, pauser)
-          .map(decode)
+          .map(decode[T])
           .map(_.right.get)
         val _hasNext = _next.isDefined && shouldContinue(_next.get)
         if (!_hasNext) {
@@ -141,12 +143,13 @@ object TimeLog {
         NoPollingReader
       )(onComplete)
 
-    def scan[U <: Ordered[U]](from: U,
-                              comparing: T => U,
-                              shouldContinue: T => Boolean,
-                              duration: ScanDuration = ScanDuration.Finite)
-                             (onComplete: () => Unit = () => {})
-                             (implicit de: Decoder[T]): Iterator[T] =
+    def scan[U](from: U,
+                comparing: T => U,
+                shouldContinue: T => Boolean,
+                duration: ScanDuration = ScanDuration.Finite)
+               (onComplete: () => Unit = () => {})
+               (implicit de: Decoder[T],
+                ordering: Ordering[U]): Iterator[T] =
       new TimeLogIterator(
         _search(queue.createTailer(), comparing, from),
         shouldContinue,
@@ -166,10 +169,11 @@ object TimeLog {
     }
 
     // Binary search code taken from net.openhft.chronicle.queue.impl.single.BinarySearch
-    def _search[U <: Ordered[U]](tailer: ExcerptTailer,
-                                 comparing: T => U,
-                                 key: U)
-                                (implicit de: Decoder[T]): ExcerptTailer = {
+    def _search[U](tailer: ExcerptTailer,
+                   comparing: T => U,
+                   key: U)
+                  (implicit de: Decoder[T],
+                   ordering: Ordering[U]): ExcerptTailer = {
       val start = tailer.toStart.index
       val end = tailer.toEnd.index
       val rollCycle: RollCycle = queue.rollCycle
@@ -196,7 +200,7 @@ object TimeLog {
           if (dc.isEmpty)
             return -1
 
-          val compare = comparing(decode(dc.get).right.get).compare(key)
+          val compare = ordering.compare(comparing(decode(dc.get).right.get), key)
           if (compare < 0)
             lowSeqNum = midSeqNum + 1
           else if (compare > 0)
@@ -222,7 +226,7 @@ object TimeLog {
           if (!b)
             return prevIndex
 
-          val compare = comparing(decode(tailer.readText).right.get).compare(key)
+          val compare = ordering.compare(comparing(decode(tailer.readText).right.get), key)
           if (compare == 0) {
             return compare
           } else if (compare > 0) {

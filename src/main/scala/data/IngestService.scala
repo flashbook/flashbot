@@ -1,9 +1,13 @@
 package data
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{Actor, ActorLogging, ActorSystem}
+import akka.stream.{ActorMaterializer, Materializer}
 import core.DataSource
 
 class IngestService extends Actor with ActorLogging {
+  implicit val system: ActorSystem = context.system
+  implicit val mat: ActorMaterializer = ActorMaterializer()
+
   override def receive: Receive = {
     case (name: String, dataDir: String, config: DataSource.DataSourceConfig) =>
       config.topics.foreach({ case (topicName, _) =>

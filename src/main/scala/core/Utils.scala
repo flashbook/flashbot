@@ -38,7 +38,7 @@ object Utils {
     Flow[E].scan[Option[(R, E)]](None) {
       case (None, ev) => Some(build(ev), ev)
       case (Some((resource, _)), ev) => Some(resource, ev)
-    }.map(_.get)
+    }.drop(1).map(_.get)
 
   def deDupeStream[T](seqFn: T => Long): Flow[T, T, NotUsed] = Flow[T]
     .scan[(Long, Option[T])]((-1, None)) {
@@ -48,5 +48,6 @@ object Utils {
 
   def withIndex[T]: Flow[T, (Long, T), NotUsed] = Flow[T]
     .scan[(Long, Option[T])]((-1, None))((count, e) => (count._1 + 1, Some(e)))
+    .drop(1)
     .map(e => (e._1, e._2.get))
 }

@@ -5,6 +5,7 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Sink, Source}
 import io.circe.Json
+import io.circe.generic.auto._
 
 abstract class DataSource {
   def ingest(dataDir: String,
@@ -30,9 +31,8 @@ object DataSource {
     override def toString: String = List(srcKey, topic, dataType).mkString("/")
   }
 
-  def parseAddress(addr: String): Address = addr.split("/") match {
-    case (srcKey: String) :: (topic: String) :: (dataType: String) :: Nil =>
-      Address(srcKey, topic, dataType)
+  def parseAddress(addr: String): Address = addr.split("/").toList match {
+    case srcKey :: topic :: dataType :: Nil => Address(srcKey, topic, dataType)
   }
 
   trait DataType
@@ -41,9 +41,9 @@ object DataSource {
   case class DepthBook(depth: Int) extends BuiltInType
   case object Trades extends BuiltInType
 
-  def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_") match {
+  def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
-    case "book" :: (d: String) :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
+    case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
     case "trades" :: Nil => Some(Trades)
     case _ => None
   }

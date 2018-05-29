@@ -1,6 +1,6 @@
 package core
 
-import core.MarketData.{Sequenced, Timestamped}
+import core.MarketData.{Sequenced}
 import core.Order.{Limit, Market, OrderType, Side}
 
 sealed trait OrderEvent {
@@ -35,7 +35,7 @@ final case class Change(orderId: String,
 
 final case class Match(tradeId: Long,
                        product: Pair,
-                       time: Long,
+                       micros: Long,
                        size: Double,
                        price: Double,
                        side: Side,

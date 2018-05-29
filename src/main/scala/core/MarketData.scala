@@ -3,11 +3,11 @@ package core
 /**
   * Any kind of data that can be streamed into strategies.
   */
-trait MarketData {
+trait MarketData extends Timestamped {
   /**
-    * The time in nanos that the event occurred.
+    * The time in micros that the event occurred.
     */
-  def time: Long
+  def micros: Long
 
   /**
     * Name of the data source of this item.
@@ -26,21 +26,21 @@ trait MarketData {
 }
 
 object MarketData {
-  implicit val ordering: Ordering[MarketData] = Ordering.by(_.time)
+  implicit val ordering: Ordering[MarketData] = Ordering.by(_.micros)
 
-  // Generic market data container
+  // Generic market data container trait
   trait GenMD[T] extends MarketData {
     def data: T
   }
 
-  abstract class PricedMD[T](val time: Long,
-                             val source: String,
-                             val topic: String,
-                             val dataType: String,
-                             val price: Double,
-                             val data: T) extends GenMD[T] with Priced {
-    def product: Pair = Utils.parseProductId(topic)
-  }
+//  abstract class PricedMD[T](val time: Long,
+//                             val source: String,
+//                             val topic: String,
+//                             val dataType: String,
+//                             val price: Double,
+//                             val data: T) extends GenMD[T] with Priced {
+//    def product: Pair = Utils.parseProductId(topic)
+//  }
 
   trait Sequenced {
     def seq: Long
@@ -50,7 +50,7 @@ object MarketData {
     def product: Pair
   }
 
-  trait Priced extends HasProduct {
-    def price: Double
-  }
+//  trait Priced extends HasProduct {
+//    def price: Double
+//  }
 }

@@ -18,9 +18,8 @@ class TwitterSearchDataSource extends DataSource {
                      (implicit sys: ActorSystem,
                       mat: ActorMaterializer): Unit = ???
 
-  override def stream(sink: Sink[MarketData, NotUsed],
-                      dataDir: String,
+  override def stream(dataDir: String,
                       topic: String,
                       dataType: String,
-                      timeRange: core.TimeRange): Unit = ???
+                      timeRange: core.TimeRange): Iterator[MarketData] = ???
 }

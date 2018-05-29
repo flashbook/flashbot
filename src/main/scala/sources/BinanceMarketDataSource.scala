@@ -10,19 +10,18 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import com.github.andyglow.websocket.{Websocket, WebsocketClient}
-import core.AggBook.AggBookMD
-import core.{AggBook, DataSource, MarketData, Pair, Timestamped, Trade, TradeMD}
+import core.AggBook._
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import core.Utils._
-import core.{Ask, Bid}
+import core.{AggBook => _, _}
 import data.TimeLog
 import data.TimeLog.TimeLog
-import io.circe.Json
+import io.circe.{Decoder, Json}
 import io.circe.generic.auto._
 import io.circe.syntax._
 
 import scala.collection.immutable.Queue
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 class BinanceMarketDataSource extends DataSource {
@@ -90,7 +89,9 @@ class BinanceMarketDataSource extends DataSource {
       .via(initResource(md => timeLog[TradeMD](dataDir, md.product, md.dataType)))
 
       // Persist trades
-      .to(Sink.foreach { case (timeLog, md) => timeLog.enqueue(md) }).run
+      .to(Sink.foreach {
+        case (timeLog, md) => timeLog.enqueue(md)
+      }).run
 
     dataTypes
       .map { case (k, v) => (parseBuiltInDataType(k).get, v) }
@@ -110,8 +111,9 @@ class BinanceMarketDataSource extends DataSource {
             new BinanceEventsProvider[TradeEvent](
               "trade",
               topics.keySet.map(parseProductId),
-              (product, t) => tradeStream ! TradeMD(SRC, product.toString,
-                Trade(t.t.toString, t.T * 1000000, t.p.toDouble, t.q.toDouble))
+              (product, t) =>
+                tradeStream ! TradeMD(SRC, product.toString,
+                  Trade(t.t.toString, t.T * 1000000, t.p.toDouble, t.q.toDouble))
             )
           ))
 
@@ -145,7 +147,7 @@ class BinanceMarketDataSource extends DataSource {
             val foundNextEvent = event.U <= key && event.u >= key
             if (foundNextEvent) {
               state = Some(AggSnapshot(event.u, prevState.get.book.copy(
-                time = event.E * 1000000,
+                micros = event.E * 1000000,
                 data = applyPricePoints(prevState.get.book.data, event.b, event.a)
               )))
             }
@@ -161,8 +163,8 @@ class BinanceMarketDataSource extends DataSource {
 
       case Some(Trades) =>
         val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
-        tradesLog.scan(timeRange.from, _.time,
-          md => timeRange.to.forall(md.time < _))(tradesLog.close)
+        tradesLog.scan(timeRange.from, _.micros,
+          md => timeRange.to.forall(md.micros < _))(tradesLog.close)
 
       case Some(_) =>
         throw new RuntimeException(s"Unsupported data type: $dataType")
@@ -171,14 +173,61 @@ class BinanceMarketDataSource extends DataSource {
     }
   }
 
+  /*
+   * Data formats of WebSocket and API responses
+   */
+
+  case class DepthSnapshotBody(lastUpdateId: Long,
+                               bids: Seq[Seq[Json]],
+                               asks: Seq[Seq[Json]])
+
+  case class AggSnapshot(lastUpdateId: Long, book: AggBookMD) extends Timestamped {
+    override def micros: Long = book.micros
+  }
+
+  sealed trait RspBody extends Timestamped {
+    def timeMillis: Long
+    def micros: Long = timeMillis * 1000
+  }
+
+  case class TradeEvent(e: String, // Event type
+                        E: Long, // Event time in millis
+                        s: String, // Symbol
+                        t: Long, // Trade ID
+                        p: String, // Price
+                        q: String, // Quantity
+                        b: Long, // Buyer order id
+                        a: Long, // Seller order id
+                        T: Long, // Trade time
+                        m: Boolean, // Whether the buyer is the market maker
+                        M: Boolean // Unknown ... ignore
+  ) extends RspBody {
+    override def timeMillis: Long = E
+  }
+
+  case class DepthUpdateEvent(e: String,
+                              E: Long, // Event time in millis
+                              s: String, // Symbol
+                              U: Long, // First update id in event
+                              u: Long, // Final update id in event
+                              b: Seq[Seq[Json]], // Bid updates
+                              a: Seq[Seq[Json]] // Ask updates
+  ) extends RspBody {
+    override def timeMillis: Long = E
+  }
+
+
   /**
     * Collects events from the Binance WebSocket API. Rotates WebSocket connections periodically
     * because Binance shuts down single connections that are open for over 24 hours.
     */
   class BinanceEventsProvider[T <: RspBody]
-  (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit) extends Actor {
+  (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit)
+  (implicit de: Decoder[T]) extends Actor {
 
-    case class StreamWrap(stream: String, data: RspBody)
+    implicit val ec: ExecutionContext = context.dispatcher
+
+    case class StreamWrap[R <: RspBody](stream: String, data: R)
 
     private val wsRotatePeriodMillis: Long = 1000 * 60 * 60
 
@@ -224,17 +273,20 @@ class BinanceMarketDataSource extends DataSource {
         tempWebSocket = None
     }
 
-    def createClient: WebsocketClient[String] =
-      WebsocketClient[String](s"wss://stream.binance.com:9443/streams?streams=" +
-        symbols.keySet.map(_ + "@" + streamName).mkString("/")) {
+    def createClient: WebsocketClient[String] = {
+      val url = "wss://stream.binance.com:9443/stream?streams=" +
+        symbols.keySet.map(_ + "@" + streamName).mkString("/")
+      println(url)
+      WebsocketClient[String](url) {
         case str =>
-          parseJson[StreamWrap](str) match {
+          parseJson[StreamWrap[T]](str) match {
             case Right(wrap) =>
-              self ! _
+              self ! wrap
             case Left(a) =>
               throw new RuntimeException(a)
           }
       }
+    }
   }
 
   /**
@@ -242,6 +294,11 @@ class BinanceMarketDataSource extends DataSource {
     * a depth snapshot for every product and playing the depth update events on top.
     */
   class AggBookProvider(product: Pair, updateFn: AggBookMD => Unit) extends Actor {
+
+    import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
+    implicit val ec: ExecutionContext = context.dispatcher
+    implicit val system: ActorSystem = context.system
+    implicit val mat: ActorMaterializer = ActorMaterializer()
 
     private var buffer = Queue.empty[DepthUpdateEvent]
     private var hasRequestedSnapshot = false
@@ -295,7 +352,7 @@ class BinanceMarketDataSource extends DataSource {
    * Helper functions
    */
 
-  private def timeLog[T](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
     TimeLog[T](new File(s"$dataDir/$SRC/$product/$name"))
 
   private def parsePricePoint(point: Seq[Json]): (Double, Double) =
@@ -310,46 +367,4 @@ class BinanceMarketDataSource extends DataSource {
       memo.updateLevel(Ask, parsePricePoint(point)._1, parsePricePoint(point)._2))
     bidsAndAsks
   }
-
-
-  /*
-   * Data formats of WebSocket and API responses
-   */
-
-  sealed trait RspBody {
-    def timeMillis: Long
-  }
-
-  case class TradeEvent(e: String, // Event type
-                        E: Long, // Event time in millis
-                        s: String, // Symbol
-                        t: Long, // Trade ID
-                        p: String, // Price
-                        q: String, // Quantity
-                        b: Long, // Buyer order id
-                        a: Long, // Seller order id
-                        T: Long, // Trade time
-                        m: Boolean, // Whether the buyer is the market maker
-                        M: Boolean // Unknown ... ignore
-  ) extends RspBody {
-    override def timeMillis: Long = E
-  }
-
-  case class DepthUpdateEvent(e: String,
-                              E: Long, // Event time in millis
-                              s: String, // Symbol
-                              U: Long, // First update id in event
-                              u: Long, // Final update id in event
-                              b: Seq[Seq[Json]], // Bid updates
-                              a: Seq[Seq[Json]] // Ask updates
-  ) extends RspBody {
-    override def timeMillis: Long = E
-  }
-
-
-  case class DepthSnapshotBody(lastUpdateId: Long,
-                               bids: Seq[Seq[Json]],
-                               asks: Seq[Seq[Json]])
-
-  case class AggSnapshot(lastUpdateId: Long, book: AggBookMD)
 }

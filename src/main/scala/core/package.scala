@@ -1,13 +1,15 @@
 import core.MarketData.GenMD
 import core.Utils.parseProductId
 
+import io.circe.generic.auto._
+
 package object core {
 
   // TODO: Can we use refinement types to enforce the bounds?
   type Ratio = Double // Between -1 and 1 inclusive
   type Percent = Double // Between 0 and 1 inclusive
 
-  trait BarUnit
+  sealed trait BarUnit
   case object Seconds extends BarUnit
   case object Minutes extends BarUnit
   case object Hours extends BarUnit
@@ -30,22 +32,22 @@ package object core {
     def toSeq: Seq[String] = List(base, quote)
   }
 
-  case class Trade(id: String, time: Long, price: Double, size: Double)
+  case class Trade(id: String, micros: Long, price: Double, size: Double) extends Timestamped
 
   case class TradeMD(source: String, topic: String, data: Trade) extends GenMD[Trade] {
     val dataType: String = "trades"
-    def time: Long = data.time
     def product: Pair = parseProductId(topic)
+    override def micros: Long = data.micros
   }
 
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])
 
   trait Timestamped {
-    def time: Long
+    def micros: Long
   }
   object Timestamped {
-    val ordering: Ordering[Timestamped] = Ordering.by(_.time)
+    val ordering: Ordering[Timestamped] = Ordering.by(_.micros)
   }
 
   sealed trait QuoteSide

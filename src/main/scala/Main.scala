@@ -5,8 +5,15 @@ import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
-import core.{DataSource, TradingEngine}
+import core.{DataSource, Exchange}
+import core.DataSource.DataSourceConfig
+import core.Exchange.ExchangeConfig
+import core.CurrencyConfig
 import data.IngestService
+import io.circe.Json
+import io.circe.generic.auto._
+import io.circe.syntax._
+import io.circe.parser._
 import io.prometheus.client.exporter.HTTPServer
 
 import scala.concurrent.ExecutionContext
@@ -14,12 +21,21 @@ import scala.io.Source
 
 object Main {
 
+  case class ConfigFile(api_key: String = "",
+                        strategies: Map[String, String] = Map.empty,
+                        exchanges: Map[String, ExchangeConfig] = Map.empty,
+                        data_sources: Map[String, DataSourceConfig] = Map.empty,
+                        currencies: Map[String, CurrencyConfig] = Map.empty)
+
+
+  val DEFAULT_CONFIG_FILE = new File(".")
+
   case class Opts(dataPath: String = "flashbot_data",
 //                  logPath: String = "flashbot_logs",
                   port: Int = 9020,
                   metricsPort: Int = 0,
                   cmd: String = "",
-                  config: File = new File("."),
+                  config: File = DEFAULT_CONFIG_FILE,
                   name: String = "",
                   sources: Seq[String] = List.empty)
 
@@ -49,8 +65,8 @@ object Main {
           .action((x, c) => c.copy(sources = x))
           .text("Comma separated list of data sources to ingest"))
 
-    cmd("trade").action((_, c) => c.copy(cmd = "trade"))
-      .text("Start a local trading server for running strategies in a (live or simulated) environment.")
+    cmd("server").action((_, c) => c.copy(cmd = "server"))
+      .text("Start a local trading server.")
       .children(
         opt[Int]('p', "port")
           .action((x, c) => c.copy(port = x))
@@ -58,7 +74,6 @@ object Main {
       )
 
     help("help").text("Prints this usage text")
-      .required()
 
     checkConfig(c =>
       if (c.cmd.isEmpty) failure("enter a command")
@@ -76,8 +91,16 @@ object Main {
     import io.circe.syntax._
 
     val opts = optsParser.parse(args, Opts()).get
-    val flashbotConfig = Source.fromFile(opts.config)
-      .getLines.mkString.asJson.as[ConfigFile].right.get
+
+    val baseConfig = parse(Source
+      .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
+      .getLines.mkString).right.get.as[ConfigFile].right.get
+
+    val flashbotConfig = baseConfig
+//    val flashbotConfig = Source.fromFile(opts.config)
+//      .getLines.mkString.asJson.as[ConfigFile].right.get
+
+    println(flashbotConfig)
 
     val systemConfig = ConfigFactory.load()
       .withValue("akka.persistence.journal.leveldb.dir",
@@ -104,15 +127,16 @@ object Main {
             flashbotConfig.data_sources(srcName))
         })
 
-      case "trade" =>
-        val engine = system.actorOf(
-          Props(new TradingEngine(
-            flashbotConfig.strategies,
-            flashbotConfig.data_sources.mapValues(_.`class`),
-            flashbotConfig.exchanges.mapValues(_.`class`))),
-          "trading-engine"
-        )
-        Http().bindAndHandle(api.routes(engine), "localhost", 9020)
+      case "server" =>
+//        val engine = system.actorOf(
+//          Props(new TradingEngine(
+//            opts.dataPath,
+//            flashbotConfig.strategies,
+//            flashbotConfig.data_sources.mapValues(_.`class`),
+//            flashbotConfig.exchanges.mapValues(_.`class`))),
+//          "trading-engine"
+//        )
+//        Http().bindAndHandle(api.routes(engine), "localhost", 9020)
     }
 
   }

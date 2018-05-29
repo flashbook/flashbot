@@ -16,11 +16,10 @@ class BitMEXMarketDataSource extends DataSource {
     println("Ingesting BitMEX")
   }
 
-  override def stream(sink: Sink[MarketData, NotUsed],
-                      dataDir: String,
+  override def stream(dataDir: String,
                       topic: String,
                       dataType: String,
-                      timeRange: core.TimeRange): Unit = ???
+                      timeRange: core.TimeRange): Iterator[MarketData] = ???
 
   //  override def index(dataDir: String, topic: String, dataType: String): Seq[core.TimeRange] = ???
 }

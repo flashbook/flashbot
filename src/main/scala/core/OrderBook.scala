@@ -1,6 +1,6 @@
 package core
 
-import core.MarketData.{GenMD, HasProduct, Sequenced, Timestamped}
+import core.MarketData.{GenMD, HasProduct, Sequenced}
 import core.Order.{Buy, Sell, Side}
 import core.Utils.parseProductId
 
@@ -59,7 +59,7 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
 
   private def rmFromIndex(idx: TreeMap[Double, Set[Order]], o: Order):
   TreeMap[Double, Set[Order]] = {
-    val os = idx(o.price) - o
+    val os = idx(o.price.get) - o
     if (os.isEmpty) idx - o.price.get else idx + (o.price.get -> os)
   }
 }
@@ -74,7 +74,7 @@ object OrderBook {
 
     override def dataType: String = "book"
     override def product: Pair = parseProductId(topic)
-    override def time: Long = rawEvent.get.time
+    override def micros: Long = rawEvent.get.micros
 
     def addSnapshot(seq: Long, snapshot: Seq[SnapshotOrder]): OrderBookMD[E] = copy(
       seq = seq,
@@ -94,6 +94,7 @@ object OrderBook {
       data = data.processOrderEvent(event.toOrderEvent),
       rawEvent = Some(event)
     )
+
   }
 
   final case class SnapshotOrder(product: String,

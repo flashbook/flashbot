@@ -18,6 +18,7 @@ import data.OrderBookProvider.Subscribe
 import data.TimeLog.TimeLog
 import data.{OrderBookProvider, TimeLog}
 import io.circe.Json
+import io.circe.generic.auto._
 import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import net.openhft.chronicle.queue.TailerDirection
 
@@ -54,7 +55,7 @@ class CoinbaseMarketDataSource extends DataSource {
       }
       .to(Sink.foreach {
         case (Some((eventsQueue, snapshotsQueue, tradesQueue)), count,
-                Some(md @ OrderBookMD(_, _, _, Some(rawEvent), _))) =>
+                Some(md @ OrderBookMD(_, _, _, Some(rawEvent: APIOrderEvent), _))) =>
 
           // Persist the full order book stream
           if (dts.isDefinedAt(FullBook)) {
@@ -66,7 +67,7 @@ class CoinbaseMarketDataSource extends DataSource {
               val snapshotOrders = md.getSnapshot
               snapshotOrders.foreach {
                 order =>
-                  snapshotsQueue.enqueue(SnapshotItem(order, md.time, itemCount,
+                  snapshotsQueue.enqueue(SnapshotItem(order, md.micros, itemCount,
                     snapshotOrders.size))
                   itemCount = itemCount + 1
               }
@@ -95,8 +96,8 @@ class CoinbaseMarketDataSource extends DataSource {
       case Some(x) => (x, timeRange) match {
 
         case (FullBook, TimeRange(from, to)) =>
-          val snapshotQueue: TimeLog[SnapshotItem] =
-            timeLog(dataDir, parseProductId(topic), "book/snapshots")
+          val snapshotQueue =
+            timeLog[SnapshotItem](dataDir, parseProductId(topic), "book/snapshots")
 
           // Read the snapshots queue backwards until we can build up the latest snapshot.
           var snapOrders: Option[Queue[SnapshotOrder]] = None
@@ -115,8 +116,8 @@ class CoinbaseMarketDataSource extends DataSource {
           }
 
           if (snapOrders.isDefined) {
-            val eventsQueue: TimeLog[APIOrderEvent] =
-              timeLog(dataDir, parseProductId(topic), "book/events")
+            val eventsQueue =
+              timeLog[APIOrderEvent](dataDir, parseProductId(topic), "book/events")
             val seq = snapOrders.get.head.seq
             var state = OrderBookMD[APIOrderEvent](NAME, topic)
               .addSnapshot(snapOrders.get.head.seq, snapOrders.get)
@@ -136,9 +137,9 @@ class CoinbaseMarketDataSource extends DataSource {
           }
 
         case (Trades, TimeRange(from, to)) =>
-          val tradesQueue: TimeLog[TradeMD] =
-            timeLog(dataDir, parseProductId(topic), "trades")
-          tradesQueue.scan(from, _.time, md => to.forall(md.time < _))(tradesQueue.close)
+          val tradesQueue =
+            timeLog[TradeMD](dataDir, parseProductId(topic), "trades")
+          tradesQueue.scan(from, _.micros, md => to.forall(md.micros < _))(tradesQueue.close)
 
         case (DepthBook(_), _) =>
           throw new RuntimeException(s"Coinbase order book aggregations not yet implemented")
@@ -148,14 +149,15 @@ class CoinbaseMarketDataSource extends DataSource {
     }
   }
 
-  private def timeLog[T](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
     TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**
     * Additional metadata attached to each SnapshotOrder that helps us read snapshots from the
     * queue without maintaining a separate index.
     */
-  case class SnapshotItem(order: SnapshotOrder, time: Long, index: Int, total: Int)
+  case class SnapshotItem(order: SnapshotOrder, micros: Long, index: Int, total: Int)
+    extends Timestamped
 
 
   // Has to check that sequence number are actually sequential.
@@ -256,7 +258,7 @@ class CoinbaseMarketDataSource extends DataSource {
   case class APIOrderEvent(`type`: String,
                             product_id: String,
                             seq: Long,
-                            time: Long,
+                            micros: Long,
                             size: Option[Double],
                             price: Option[Double],
                             order_id: Option[String],
@@ -299,7 +301,7 @@ class CoinbaseMarketDataSource extends DataSource {
         case "change" =>
           Change(order_id.get, parseProductId(product_id), price, new_size.get)
         case "match" =>
-          Match(trade_id.get, parseProductId(product_id), time, size.get, price.get,
+          Match(trade_id.get, parseProductId(product_id), micros, size.get, price.get,
             Side.parseSide(side.get), maker_order_id.get, taker_order_id.get)
         case "received" =>
           Received(order_id.get, parseProductId(product_id), client_oid,
