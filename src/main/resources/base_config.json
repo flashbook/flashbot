@@ -74,10 +74,11 @@
   },
 
   "strategies": {
-    "dmac": "io.flashbook.strategies.DualMovingAverageCrossover",
-    "signal": "io.flashbook.strategies.ExternalSignal",
-    "latency_arb": "io.flashbook.strategies.LatencyArbitrage",
-    "twitter_vol": "io.flashbook.strategies.TwitterVolumeTrader"
+    "dmac": "strategies.DualMovingAverageCrossover",
+    "signal": "strategies.ExternalSignal",
+    "latency_arb": "strategies.LatencyArbitrage",
+    "twitter_vol": "strategies.TwitterVolumeTrader",
+    "random": "strategies.OrderRandomly"
   },
 
   "currencies": {

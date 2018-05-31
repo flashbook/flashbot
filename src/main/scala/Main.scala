@@ -2,22 +2,16 @@ import scopt.OptionParser
 import java.io.File
 import java.net.URI
 
-import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
+import akka.actor.{ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.stream.{ActorMaterializer, Materializer}
-import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
-import core.{CurrencyConfig, DataSource, Exchange, Utils}
+import akka.stream.Materializer
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
+import core.{CurrencyConfig, TradingEngine, Utils}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
 import data.IngestService
-import io.circe.Json
-import io.circe.generic.auto._
-import io.circe.syntax._
 import io.circe.parser._
 import io.prometheus.client.exporter.HTTPServer
-import org.java_websocket.WebSocket
-import org.java_websocket.framing.Framedata
-import org.java_websocket.handshake.ServerHandshake
 
 import scala.concurrent.ExecutionContext
 import scala.io.Source
@@ -103,8 +97,6 @@ object Main {
 //    val flashbotConfig = Source.fromFile(opts.config)
 //      .getLines.mkString.asJson.as[ConfigFile].right.get
 
-    println(flashbotConfig)
-
     val systemConfig = ConfigFactory.load()
       .withValue("akka.persistence.journal.leveldb.dir",
         ConfigValueFactory.fromAnyRef(s"${opts.dataPath}/journal"))
@@ -132,15 +124,15 @@ object Main {
         })
 
       case "server" =>
-//        val engine = system.actorOf(
-//          Props(new TradingEngine(
-//            opts.dataPath,
-//            flashbotConfig.strategies,
-//            flashbotConfig.data_sources.mapValues(_.`class`),
-//            flashbotConfig.exchanges.mapValues(_.`class`))),
-//          "trading-engine"
-//        )
-//        Http().bindAndHandle(api.routes(engine), "localhost", 9020)
+        val engine = system.actorOf(
+          Props(new TradingEngine(
+            opts.dataPath,
+            flashbotConfig.strategies,
+            flashbotConfig.data_sources.mapValues(_.`class`),
+            flashbotConfig.exchanges.mapValues(_.`class`))),
+          "trading-engine"
+        )
+        Http().bindAndHandle(api.routes(engine), "localhost", opts.port)
     }
 
   }

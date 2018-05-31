@@ -19,9 +19,7 @@ package object core {
 
   case class BarSize(size: Int, unit: BarUnit)
 
-  // Trading strategies always have a lower time bound, but not necessarily an upper one, in the
-  // case of live trading.
-  case class TimeRange(from: Long = 0, to: Option[Long] = None)
+  case class TimeRange(from: Long = 0, to: Long = Long.MaxValue)
 
   sealed trait PairRole
   case object Base extends PairRole
@@ -49,6 +47,8 @@ package object core {
   object Timestamped {
     val ordering: Ordering[Timestamped] = Ordering.by(_.micros)
   }
+
+  case class PricePoint(price: Double, micros: Long) extends Timestamped
 
   sealed trait QuoteSide
   case object Bid extends QuoteSide

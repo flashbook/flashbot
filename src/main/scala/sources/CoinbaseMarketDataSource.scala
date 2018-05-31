@@ -107,7 +107,7 @@ class CoinbaseMarketDataSource extends DataSource {
               .scanBackwards(_.index != 1 || snapOrders.isEmpty)(snapshotQueue.close)) {
             (snapOrders, item) match {
               case (None, SnapshotItem(order, time, index, total))
-                if index == total && time >= from && to.forall(_ > time) =>
+                if index == total && time >= from && to > time =>
                 snapOrders = Some(Queue.empty.enqueue(order))
               case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
                 snapOrders = Some(snapshotOrders.enqueue(order))
@@ -141,7 +141,7 @@ class CoinbaseMarketDataSource extends DataSource {
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue =
             timeLog[TradeMD](dataDir, parseProductId(topic), "trades")
-          tradesQueue.scan(from, _.micros, md => to.forall(md.micros < _))(tradesQueue.close)
+          tradesQueue.scan(from, _.micros, md => md.micros < to)(tradesQueue.close)
 
         case (DepthBook(_), _) =>
           throw new RuntimeException(s"Coinbase order book aggregations not yet implemented")

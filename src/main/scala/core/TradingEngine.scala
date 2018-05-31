@@ -1,18 +1,22 @@
 package core
 
-import akka.actor.{ActorLogging, ActorSystem}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, PoisonPill, Status}
 import akka.persistence._
+import akka.pattern.pipe
 import io.circe.Json
+import io.circe.parser.parse
 import java.util.UUID
 
 import TradingSession._
 import akka.NotUsed
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Source
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action._
 import core.Order.{Buy, Fill, Sell}
 
 import scala.collection.immutable.Queue
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /**
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
@@ -26,6 +30,7 @@ class TradingEngine(dataDir: String,
 
   implicit val system: ActorSystem = context.system
   implicit val mat: ActorMaterializer = Utils.buildMaterializer
+  implicit val ec: ExecutionContext = system.dispatcher
 
   import TradingEngine._
   import DataSource._
@@ -42,7 +47,7 @@ class TradingEngine(dataDir: String,
     */
   def processCommand(command: Command): Either[EngineError, Seq[Event]] = command match {
 
-    case StartTradingSession(strategyKey, strategyParams, mode) =>
+    case StartTradingSession(strategyKey, strategyParams, mode, sessionEventsRef) =>
       // Check that we have a config for the requested strategy.
       if (!strategyClassNames.isDefinedAt(strategyKey)) {
         return Left(EngineError(s"Unknown strategy: $strategyKey"))
@@ -161,7 +166,8 @@ class TradingEngine(dataDir: String,
                          balances: Map[Account, Double] = Map.empty,
                          targetManager: TargetManager = TargetManager(),
                          ids: IdManager = IdManager(),
-                         actions: ActionQueue = ActionQueue()) extends TradingSession {
+                         actions: ActionQueue = ActionQueue(),
+                         sessionEvents: Seq[SessionEvent] = Seq.empty) extends TradingSession {
 
         override val id: String = sessionId
         override val exchanges: Map[String, Exchange] = _exchanges
@@ -202,7 +208,7 @@ class TradingEngine(dataDir: String,
       // the strategy instance. If this trading session is a backtest then we merge the data
       // streams by time. But if this is a live trading session then data is sent first come,
       // first serve to keep latencies low.
-      val done = dataSourceAddresses
+      dataSourceAddresses
         .groupBy(_.srcKey)
         .flatMap { case (key, addresses) =>
           addresses.map { case Address(_, topic, dataType) =>
@@ -216,7 +222,7 @@ class TradingEngine(dataDir: String,
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
-        .scan(Session()) { case (session @ Session(seqNr, balances, tm, ids, actions), data) =>
+        .scan(Session()) { case (session @ Session(seqNr, balances, tm, ids, actions, _), data) =>
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
           // then lock the handleEvent method again.
@@ -229,6 +235,7 @@ class TradingEngine(dataDir: String,
           var newActions = actions
           var newBalances = balances
           var newTM = tm
+          var newSessionEvents = Vector(TradeEvent(Trade("foo", 1234, 56, 79)))
 
           // Update ids and actions bookkeeping state in response to fills and user data emitted
           // from the relevant exchange.
@@ -318,12 +325,24 @@ class TradingEngine(dataDir: String,
             balances = newBalances,
             targetManager = newTM,
             ids = newIds,
-            actions = newActions
+            actions = newActions,
+            sessionEvents = newSessionEvents
           )
         }
-        .runForeach(println)
+        .runForeach { s =>
+          s.sessionEvents.foreach(sessionEventsRef ! _)
+        }
+        .onComplete {
+          case Success(_) =>
+            println("success")
+            sessionEventsRef ! Status.Success
+          case Failure(err) =>
+            println("fail")
+            sessionEventsRef ! PoisonPill
+        }
 
-      Right(List(SessionStarted(sessionId, strategyKey, strategyParams, mode)))
+      val startedEvent = SessionStarted(sessionId, strategyKey, strategyParams, mode)
+      Right(startedEvent :: Nil)
   }
 
   /**
@@ -351,12 +370,48 @@ class TradingEngine(dataDir: String,
     case DeleteMessagesFailure(cause, toSeqNr) =>
       log.error(cause, "Failed to delete events: {}", toSeqNr)
 
+    case query: Query => query match {
+      case Ping => sender ! Pong
+
+      /**
+        * To resolve a backtest query, we start a trading session in Backtest mode and collect
+        * all session events into a stream that we fold over to create a report.
+        */
+      case BacktestQuery(strategyName, params, timeRange) =>
+
+        // TODO: Handle parse errors
+        val paramsJson = parse(params).right.get
+        val emptyReport = Report(
+          strategyName,
+          params,
+          timeRange,
+          done = true,
+          Vector(),
+          Map.empty
+        )
+
+        val (ref: ActorRef, fut: Future[Report]) =
+          Source.actorRef[SessionEvent](Int.MaxValue, OverflowStrategy.fail)
+            .toMat(Sink.fold(emptyReport) {
+              case (memo, TradeEvent(t)) => memo.copy(
+                trades = memo.trades :+ t
+              )
+            })(Keep.both)
+            .run
+
+        processCommand(StartTradingSession(strategyName, paramsJson, Backtest(timeRange), ref))
+
+        fut pipeTo sender
+
+      case _ => sender ! EngineError("Unsupported query type")
+    }
+
     case cmd: Command =>
       processCommand(cmd) match {
         case Left(err) =>
           sender ! err
         case Right(events) =>
-          persistAll(events) { e =>
+          persistAll(events.collect { case pe: PersistedEvent => pe }) { e =>
             state = state.update(e)
             if (lastSequenceNr % snapshotInterval == 0) {
               saveSnapshot(state)
@@ -378,20 +433,45 @@ class TradingEngine(dataDir: String,
 }
 
 object TradingEngine {
-  trait Command
+
+  sealed trait Query
+  case object Ping extends Query
+  case class BacktestQuery(strategyName: String,
+                           params: String,
+                           timeRange: TimeRange) extends Query
+
+  sealed trait Response
+  case object Pong extends Response {
+    override def toString: String = "pong"
+  }
+
+  case class Report(strategy: String,
+                    params: String,
+                    timeRange: TimeRange,
+                    done: Boolean,
+                    trades: Vector[Trade],
+                    balances: Map[String, Map[String, Vector[PricePoint]]]) extends Response
+
+  sealed trait Command
   case class StartTradingSession(strategyKey: String,
                                  strategyParams: Json,
-                                 mode: Mode) extends Command
+                                 mode: Mode,
+                                 sessionEvents: ActorRef) extends Command
 
   sealed trait Event
+  sealed trait PersistedEvent extends Event
   case class SessionStarted(id: String,
                             strategyKey: String,
                             strategyParams: Json,
-                            mode: Mode) extends Event
+                            mode: Mode) extends PersistedEvent
+  case class SessionFuture(fut: Future[akka.Done]) extends Event
+
+  sealed trait SessionEvent
+  case class TradeEvent(trade: Trade) extends SessionEvent
 
   final case class EngineError(private val message: String,
                                private val cause: Throwable = None.orNull)
-    extends Exception(message, cause)
+    extends Exception(message, cause) with Response
 
   case class EngineState(sessions: Map[String, TradingSessionRecord] = Map.empty) {
     /**
