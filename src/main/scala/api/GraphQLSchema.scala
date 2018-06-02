@@ -53,6 +53,8 @@ object GraphQLSchema {
     val FromArg = Argument("from", LongType)
     val ToArg = Argument("to", LongType)
 
+    val BalancesArg = Argument("balances", StringType)
+
     val QueryType = ObjectType("Query", fields[UserCtx, Unit](
       /**
         * Ping the trading engine. Should resolve to a pong.
@@ -65,11 +67,12 @@ object GraphQLSchema {
         * by the server after the backtest completes.
         */
       Field("backtest", ReportType,
-        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg :: Nil,
+        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg :: BalancesArg :: Nil,
         resolve = c => c.ctx.request[Report](BacktestQuery(
           c.arg(StrategyNameArg),
           c.arg(StrategyParamsArg),
-          TimeRange(c.arg(FromArg), c.arg(ToArg))
+          TimeRange(c.arg(FromArg), c.arg(ToArg)),
+          c.arg(BalancesArg)
         )))
     ))
 

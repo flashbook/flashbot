@@ -28,7 +28,7 @@ trait TradingSession {
   import TradingSession._
 
   def id: String
-  def exchanges: Map[String, Exchange]
+//  def exchanges: Map[String, Exchange]
 
   def handleEvents(events: Event*): Unit
 }

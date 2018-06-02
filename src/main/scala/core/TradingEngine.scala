@@ -17,7 +17,7 @@ import exchanges.Simulator
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 
 /**
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
@@ -49,7 +49,7 @@ class TradingEngine(dataDir: String,
     */
   def processCommand(command: Command): Either[EngineError, Seq[Event]] = command match {
 
-    case StartTradingSession(strategyKey, strategyParams, mode, sessionEventsRef) =>
+    case StartTradingSession(strategyKey, strategyParams, mode, sessionEventsRef, initialBalances) =>
       // Check that we have a config for the requested strategy.
       if (!strategyClassNames.isDefinedAt(strategyKey)) {
         return Left(EngineError(s"Unknown strategy: $strategyKey"))
@@ -98,7 +98,7 @@ class TradingEngine(dataDir: String,
       // Validate and load requested data sources.
       // Also load exchanges instances while we're at it.
       var dataSources = Map.empty[String, DataSource]
-      var loadedExchanges = Map.empty[String, Exchange]
+      var exchanges = Map.empty[String, Exchange]
       for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
         if (!dataSourceClassNames.isDefinedAt(srcKey)) {
           return Left(EngineError(s"Unknown data source: $srcKey"))
@@ -141,7 +141,9 @@ class TradingEngine(dataDir: String,
           }
 
           try {
-            loadedExchanges = loadedExchanges + (srcKey -> classOpt.get.newInstance)
+            exchanges = exchanges + (srcKey -> (
+              if (mode == Live) classOpt.get.newInstance
+              else new Simulator(classOpt.get.newInstance, defaultLatencyMicros)))
           } catch {
             case err: Throwable =>
               return Left(EngineError(s"Exchange instantiation error: $srcKey", err))
@@ -160,23 +162,23 @@ class TradingEngine(dataDir: String,
       val sessionId = UUID.randomUUID.toString
       var currentStrategySeqNr: Option[Long] = None
 
+      // Simulate exchanges unless we are in live trading mode
+//      val exchanges =
+//        if (mode == Live) loadedExchanges
+//        else loadedExchanges.mapValues(e => new Simulator(e, defaultLatencyMicros))
+
       /**
         * The trading session that we fold market data over. We pass the running session instance
         * to the strategy every time we call `handleData`.
         */
       case class Session(seqNr: Long = 0,
-                         balances: Map[Account, Double] = Map.empty,
+                         balances: Map[Account, Double] = initialBalances,
                          targetManager: TargetManager = TargetManager(),
                          ids: IdManager = IdManager(),
                          actions: ActionQueue = ActionQueue(),
                          sessionEvents: Seq[SessionEvent] = Seq.empty) extends TradingSession {
 
         override val id: String = sessionId
-
-        // Simulate exchanges unless we are in live trading mode
-        override val exchanges: Map[String, Exchange] =
-          if (mode == Live) loadedExchanges
-          else loadedExchanges.mapValues(e => new Simulator(e, defaultLatencyMicros))
 
         override def handleEvents(events: TradingSession.Event*): Unit =
           events.foreach(handleEvent)
@@ -190,7 +192,7 @@ class TradingEngine(dataDir: String,
                 case target: OrderTarget =>
                   targets = targets.enqueue(target)
                 case msg: LogMessage =>
-                  // TODO: This should save to a queue, not log to stdout...
+                  // TODO: This should save to a time log, not log to stdout...
                   log.info(msg.message)
               }
 
@@ -241,11 +243,11 @@ class TradingEngine(dataDir: String,
           var newActions = actions
           var newBalances = balances
           var newTM = tm
-          var newSessionEvents = Vector(TradeEvent(Trade("foo", 1234, 56, 79)))
+          var newSessionEvents = Seq.empty[TradeEvent]
 
           // Update ids and actions bookkeeping state in response to fills and user data emitted
           // from the relevant exchange.
-          session.exchanges.get(data.source) match {
+          exchanges.get(data.source) match {
             case Some(exchange) =>
               val (fills, userData) = exchange.update(session, data)
               def acc(currency: String) = Account(data.source, currency)
@@ -279,16 +281,25 @@ class TradingEngine(dataDir: String,
               }
 
               newBalances = fills.foldLeft(newBalances) {
-                case (bs, Fill(_, _, fee, Pair(base, quote), price, size, _, _, Buy)) =>
-                  bs + (
+                case (bs, f @ Fill(_, tradeId, fee, Pair(base, quote), price, size,
+                    createdAt, _, Buy)) =>
+                  newSessionEvents = newSessionEvents :+
+                    TradeEvent(Trade(tradeId, createdAt, price, size))
+                  val nb = bs + (
                     acc(base) -> (bs(acc(base)) + size),
                     acc(quote) -> (bs(acc(quote)) - (price * size * (1 + fee)))
                   )
-                case (bs, Fill(_, _, fee, Pair(base, quote), price, size, _, _, Sell)) =>
-                  bs + (
+                  nb
+
+                case (bs, f @ Fill(_, tradeId, fee, Pair(base, quote), price, size,
+                    createdAt, _, Sell)) =>
+                  newSessionEvents = newSessionEvents :+
+                    TradeEvent(Trade(tradeId, createdAt, price, size))
+                  val nb = bs + (
                     acc(base) -> (bs(acc(base)) - size),
                     acc(quote) -> (bs(acc(quote)) + (price * size * (1 - fee)))
                   )
+                  nb
               }
             case _ =>
           }
@@ -303,9 +314,10 @@ class TradingEngine(dataDir: String,
           }
 
           def pPair(exName: String, pair: Pair): PortfolioPair =
-            PortfolioPair(pair, (newBalances(Account(exName, pair.base)),
-              newBalances(Account(exName, pair.quote))),
-              if (pair.quote == "BTC") 0.00001 else 0.01)
+            PortfolioPair(pair, (
+                newBalances(Account(exName, pair.base)),
+                newBalances(Account(exName, pair.quote))),
+              if (pair.quote.toLowerCase == "btc") 0.00001 else 0.01)
 
           // Here is where we tell the exchange to do stuff, like place or cancel orders.
           newActions match {
@@ -315,16 +327,16 @@ class TradingEngine(dataDir: String,
                 case PostMarketOrder(clientId, targetId, pair, side, percent) =>
                   val exName = exchangeNameForTargetId(targetId)
                   newIds = newIds.initOrder(targetId, clientId)
-                  session.exchanges(exName)
+                  exchanges(exName)
                     .order(MarketOrderRequest(clientId, side, pair,
-                      if (side == Buy) None else Some(pPair(exName, pair).amount(Quote, percent)),
-                      if (side == Sell) None else Some(pPair(exName, pair).amount(Base, percent))
+                      if (side == Buy) None else Some(pPair(exName, pair).amount(Base, percent)),
+                      if (side == Sell) None else Some(pPair(exName, pair).amount(Quote, percent))
                     ))
 
                 case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
                   val exName = exchangeNameForTargetId(targetId)
                   newIds = newIds.initOrder(targetId, clientId)
-                  session.exchanges(exName)
+                  exchanges(exName)
                     .order(LimitOrderRequest(clientId, side, pair,
                       BigDecimal(price).setScale(quoteIncr(pair.quote),
                         if (side == Buy) BigDecimal.RoundingMode.CEILING
@@ -333,7 +345,7 @@ class TradingEngine(dataDir: String,
                     ))
 
                 case CancelLimitOrder(id, targetId, pair) =>
-                  session.exchanges(exchangeNameForTargetId(targetId))
+                  exchanges(exchangeNameForTargetId(targetId))
                     .cancel(ids.actualIdForTargetId(targetId))
               }
             case _ =>
@@ -397,7 +409,7 @@ class TradingEngine(dataDir: String,
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
         * all session events into a stream that we fold over to create a report.
         */
-      case BacktestQuery(strategyName, params, timeRange) =>
+      case BacktestQuery(strategyName, params, timeRange, balancesStr) =>
 
         try {
           // TODO: Handle parse errors
@@ -411,6 +423,14 @@ class TradingEngine(dataDir: String,
             Map.empty
           )
 
+          val balances = parse(balancesStr).right.get
+            .as[Map[String, Double]].right.get
+            .map { case (key, v) =>
+              val parts = key.split("/")
+              (Account(parts(0), parts(1)), v)
+            }
+
+
           val (ref: ActorRef, fut: Future[Report]) =
             Source.actorRef[SessionEvent](Int.MaxValue, OverflowStrategy.fail)
               .toMat(Sink.fold(emptyReport) {
@@ -421,7 +441,7 @@ class TradingEngine(dataDir: String,
               .run
 
           processCommand(StartTradingSession(strategyName,
-            paramsJson, Backtest(timeRange), ref)) match {
+            paramsJson, Backtest(timeRange), ref, balances)) match {
             case Left(err: EngineError) =>
               throw err
             case Right(events: Seq[Event]) =>
@@ -471,7 +491,8 @@ object TradingEngine {
   case object Ping extends Query
   case class BacktestQuery(strategyName: String,
                            params: String,
-                           timeRange: TimeRange) extends Query
+                           timeRange: TimeRange,
+                           balances: String) extends Query
 
   sealed trait Response
   case object Pong extends Response {
@@ -489,7 +510,8 @@ object TradingEngine {
   case class StartTradingSession(strategyKey: String,
                                  strategyParams: Json,
                                  mode: Mode,
-                                 sessionEvents: ActorRef) extends Command
+                                 sessionEvents: ActorRef,
+                                 initialBalances: Map[Account, Double]) extends Command
 
   sealed trait Event
   sealed trait PersistedEvent extends Event
@@ -565,5 +587,4 @@ object TradingEngine {
 
   def quoteIncr(currency: String): Int = if (currency == "BTC") 5 else 2
   def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
-
 }

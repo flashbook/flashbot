@@ -117,9 +117,6 @@ object TimeLog {
       private var _next: Option[T] = None
 
       override def hasNext: Boolean = {
-        println(queue.isClosed)
-        println("is closed?")
-
         _next = reader
           .read(tailer, pauser)
           .map(decode[T])

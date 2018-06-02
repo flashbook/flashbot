@@ -1,3 +1,3 @@
 package core
 
-case class Account(currency: String, exchange: String)
+case class Account(exchange: String, currency: String)

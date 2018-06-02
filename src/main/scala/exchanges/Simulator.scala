@@ -1,7 +1,7 @@
 package exchanges
 
 import core.AggBook.{AggBook, AggBookMD, aggFillOrder}
-import core.Order.{Buy, Fill, Taker}
+import core.Order.{Buy, Fill, Market, Taker}
 import core.OrderBook.OrderBookMD
 import core._
 
@@ -71,6 +71,10 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                 } else {
                   throw new RuntimeException("No pricing data available for simulation")
                 }
+
+                events = events :+
+                  Received(clientOid, product, Some(clientOid), Market) :+
+                  Done(clientOid, product, side, Filled, None, None)
             }
 
             /**

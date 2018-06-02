@@ -1,7 +1,9 @@
 package core
 
 import io.circe.Json
+import core.Utils.parseProductId
 import Strategy._
+import core.TradingSession.OrderTarget
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -30,7 +32,9 @@ abstract class Strategy {
     */
   def handleData(data: MarketData)(implicit ctx: TradingSession)
 
-  def orderTargetRatio(target: Ratio)(implicit ctx: TradingSession): Unit = {
+  def orderTargetRatio(exchangeName: String, product: String, target: Ratio)
+                      (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(exchangeName, target, parseProductId(product), None))
   }
 
   def orderTargetRatio(target: Ratio, price: Double, name: String = "limit")

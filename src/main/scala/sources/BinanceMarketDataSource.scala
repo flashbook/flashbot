@@ -191,7 +191,6 @@ class BinanceMarketDataSource extends DataSource {
         val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
         tradesLog.scan(timeRange.from, _.micros,
           md => {
-            println("SUP", md.micros < timeRange.to)
             md.micros < timeRange.to
           })()
 
