@@ -28,11 +28,13 @@ sealed trait OrderRequest {
   val side: Side
   val product: Pair
 }
+
 final case class LimitOrderRequest(clientOid: String,
                                    side: Side,
                                    product: Pair,
                                    price: Double,
                                    size: Double) extends OrderRequest
+
 final case class MarketOrderRequest(clientOid: String,
                                     side: Side,
                                     product: Pair,

@@ -1,8 +1,9 @@
 package core
 
 import core.MarketData.GenMD
+import core.Order.{Buy, Side}
 import core.Utils.parseProductId
-import io.circe.{Decoder, Encoder, KeyDecoder, KeyEncoder}
+import io.circe.{KeyDecoder, KeyEncoder}
 import io.circe.generic.auto._
 
 import scala.collection.immutable.TreeMap
@@ -31,6 +32,27 @@ object AggBook {
       }
   }
 
+  def aggFillOrder(book: AggBook, side: Side, sizeOrFunds: Double): Seq[(Double, Double)] = {
+    val bookSide = if (side == Buy) book.asks else book.bids
+    val bookSideSeq = bookSide.asInstanceOf[TreeMap[Double, Double]].toSeq
+    // If looking at asks, sort by increasing, otherwise, decreasing
+    val bookSideIt = if (side == Buy) bookSideSeq.iterator else bookSideSeq.reverseIterator
+    var remainingAmount = sizeOrFunds
+    var fills = Seq.empty[(Double, Double)]
+    while (remainingAmount > 0 && bookSideIt.hasNext) {
+      val (price, quantity) = bookSideIt.next
+      if (side == Buy) {
+        val min = math.min(remainingAmount, price * quantity)
+        fills = fills :+ (price, min / price)
+        remainingAmount = remainingAmount - min
+      } else {
+        val min = math.min(remainingAmount, quantity)
+        fills = fills :+ (price, min)
+        remainingAmount = remainingAmount - min
+      }
+    }
+    fills
+  }
 
   case class AggBookMD(source: String,
                        topic: String,

@@ -1,6 +1,7 @@
 package exchanges
 
-import core.AggBook.{AggBook, AggBookMD}
+import core.AggBook.{AggBook, AggBookMD, aggFillOrder}
+import core.Order.{Buy, Fill, Taker}
 import core.OrderBook.OrderBookMD
 import core._
 
@@ -48,11 +49,28 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                 * fully filled, the remainder is placed on the resting order book.
                 */
               case LimitOrderRequest(clientOid, side, product, price, size) =>
+                // TODO: Implement this
+                ???
 
               /**
                 * Market orders need to be filled immediately.
                 */
               case MarketOrderRequest(clientOid, side, product, size, funds) =>
+                if (depths.isDefinedAt(product)) {
+                  fills = fills ++
+                    aggFillOrder(depths(product), side, if (side == Buy) funds.get else size.get)
+                      .map { case (price, quantity) => Fill(clientOid, clientOid, takerFee,
+                        product, price, quantity, currentTimeMicros, Taker, side)}
+
+                } else if (prices.isDefinedAt(product)) {
+                  // We may not have aggregate book data, in that case, simply use the last price.
+                  fills = fills :+ Fill(clientOid, clientOid, takerFee, product, prices(product),
+                    if (side == Buy) funds.get / prices(product) else size.get,
+                    currentTimeMicros, Taker, side)
+
+                } else {
+                  throw new RuntimeException("No pricing data available for simulation")
+                }
             }
 
             /**
