@@ -17,7 +17,7 @@ class OrderRandomly extends Strategy {
 
   override def initialize(params: Json): List[String] = {
     _params = Some(params.as[Params].right.get)
-    List(_params.get.exchange)
+    List(_params.get.exchange + "/" + _params.get.market + "/trades")
   }
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = {

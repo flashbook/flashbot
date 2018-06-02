@@ -1,6 +1,6 @@
 package exchanges
 
-import core.{Exchange, Order, OrderEvent, OrderRequest, Pair, TradingSession}
+import core.{Exchange, MarketData, Order, OrderEvent, OrderRequest, Pair, TradingSession}
 
 class Binance extends Exchange {
   override def makerFee: Double = ???
@@ -9,9 +9,9 @@ class Binance extends Exchange {
 
   override def formatPair(pair: Pair): String = ???
 
-  override def cancel(id: String): Unit = ???
-
-  override def update(session: TradingSession): (Seq[Order.Fill], Seq[OrderEvent]) = ???
+  override def update(session: TradingSession, data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = ???
 
   override def order(req: OrderRequest): Unit = ???
+
+  override def cancel(id: String): Unit = ???
 }

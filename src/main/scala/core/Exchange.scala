@@ -12,11 +12,15 @@ trait Exchange {
   def takerFee: Double
   def formatPair(pair: Pair): String
 
-  def cancel(id: String): Unit
-  def update(session: TradingSession): (Seq[Fill], Seq[OrderEvent])
+  /**
+    * A function that returns user data by the exchange in its current state for the given
+    * trading session.
+    */
+  def update(session: TradingSession, data: MarketData): (Seq[Fill], Seq[OrderEvent])
 
-  // Orders submitted to the exchange are fire-and-forget
+  // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
+  def cancel(id: String): Unit
 }
 
 sealed trait OrderRequest {

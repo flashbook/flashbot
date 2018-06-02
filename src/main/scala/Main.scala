@@ -126,7 +126,7 @@ object Main {
       case "server" =>
         val engine = system.actorOf(
           Props(new TradingEngine(
-            opts.dataPath,
+            List(opts.dataPath, "sources").mkString("/"),
             flashbotConfig.strategies,
             flashbotConfig.data_sources.mapValues(_.`class`),
             flashbotConfig.exchanges.mapValues(_.`class`))),

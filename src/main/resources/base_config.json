@@ -2,13 +2,13 @@
   "api_key": "",
   "exchanges": {
     "gdax": {
-      "class": "io.flashbook.exchanges.GDAX"
+      "class": "exchanges.GDAX"
     },
     "binance": {
-      "class": "io.flashbook.exchanges.Binance"
+      "class": "exchanges.Binance"
     },
     "bitmex": {
-      "class": "io.flashbook.exchanges.BitMEX"
+      "class": "exchanges.BitMEX"
     }
   },
 

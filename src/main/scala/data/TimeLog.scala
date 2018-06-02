@@ -63,10 +63,13 @@ object TimeLog {
 
     private val RetentionPeriod = 1000 * 60 * 60 * 24 * 30
 
+    private def microsToMillis(micros: Long) = math.floor(micros.toDouble / 1000).toLong
+    var lastMessage: Option[T] = None
     var inFlightMessage: Option[T] = None
+
     object TimestampProvider extends TimeProvider {
       override def currentTimeMillis: Long =
-        math.floor(inFlightMessage.get.micros.toDouble / 1000).toLong
+        inFlightMessage.orElse(lastMessage).map(x => microsToMillis(x.micros)).getOrElse(0)
     }
 
     private val queue = SingleChronicleQueueBuilder
@@ -85,6 +88,7 @@ object TimeLog {
       val appender: ExcerptAppender = queue.acquireAppender
       appender.writeBytes(Bytes.fromString(printer.pretty(msg.asJson)))
       pauser.unpause()
+      lastMessage = inFlightMessage
       inFlightMessage = None
     }
 
@@ -113,6 +117,9 @@ object TimeLog {
       private var _next: Option[T] = None
 
       override def hasNext: Boolean = {
+        println(queue.isClosed)
+        println("is closed?")
+
         _next = reader
           .read(tailer, pauser)
           .map(decode[T])
@@ -158,6 +165,7 @@ object TimeLog {
 //    }
 
     def close(): Unit = {
+      println("CLOSING")
       queue.close()
     }
 
@@ -242,7 +250,11 @@ object TimeLog {
         findWithinCycle(cycle.toInt)
       }
 
-      tailer.moveToIndex(findIt match {
+      val found: Long = findIt
+      println("found", found)
+      println(tailer.toStart.index, tailer.toEnd.index)
+
+      tailer.moveToIndex(found match {
         case -1 => 0
         case x => math.abs(x)
       })

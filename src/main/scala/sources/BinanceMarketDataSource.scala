@@ -190,7 +190,10 @@ class BinanceMarketDataSource extends DataSource {
       case Some(Trades) =>
         val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
         tradesLog.scan(timeRange.from, _.micros,
-          md => md.micros < timeRange.to)(tradesLog.close)
+          md => {
+            println("SUP", md.micros < timeRange.to)
+            md.micros < timeRange.to
+          })()
 
       case Some(_) =>
         throw new RuntimeException(s"Unsupported data type: $dataType")

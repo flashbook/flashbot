@@ -13,6 +13,7 @@ import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action._
 import core.Order.{Buy, Fill, Sell}
+import exchanges.Simulator
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,6 +38,7 @@ class TradingEngine(dataDir: String,
   import scala.collection.immutable.Seq
 
   val snapshotInterval = 1000
+  val defaultLatencyMicros = 1000
   var state = EngineState()
 
   override def persistenceId: String = "trading-engine"
@@ -96,7 +98,7 @@ class TradingEngine(dataDir: String,
       // Validate and load requested data sources.
       // Also load exchanges instances while we're at it.
       var dataSources = Map.empty[String, DataSource]
-      var _exchanges = Map.empty[String, Exchange]
+      var loadedExchanges = Map.empty[String, Exchange]
       for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
         if (!dataSourceClassNames.isDefinedAt(srcKey)) {
           return Left(EngineError(s"Unknown data source: $srcKey"))
@@ -131,7 +133,7 @@ class TradingEngine(dataDir: String,
               .asSubclass(classOf[Exchange]))
           } catch {
             case err: ClassNotFoundException =>
-              return Left(EngineError("Strategy class not found: " +
+              return Left(EngineError("Exchange class not found: " +
                 exchangeClassNames(srcKey), err))
             case err: ClassCastException =>
               return Left(EngineError(s"Class ${exchangeClassNames(srcKey)} must be a " +
@@ -139,7 +141,7 @@ class TradingEngine(dataDir: String,
           }
 
           try {
-            _exchanges = _exchanges + (srcKey -> classOpt.get.newInstance)
+            loadedExchanges = loadedExchanges + (srcKey -> classOpt.get.newInstance)
           } catch {
             case err: Throwable =>
               return Left(EngineError(s"Exchange instantiation error: $srcKey", err))
@@ -170,7 +172,11 @@ class TradingEngine(dataDir: String,
                          sessionEvents: Seq[SessionEvent] = Seq.empty) extends TradingSession {
 
         override val id: String = sessionId
-        override val exchanges: Map[String, Exchange] = _exchanges
+
+        // Simulate exchanges unless we are in live trading mode
+        override val exchanges: Map[String, Exchange] =
+          if (mode == Live) loadedExchanges
+          else loadedExchanges.mapValues(e => new Simulator(e, defaultLatencyMicros))
 
         override def handleEvents(events: TradingSession.Event*): Unit =
           events.foreach(handleEvent)
@@ -241,20 +247,32 @@ class TradingEngine(dataDir: String,
           // from the relevant exchange.
           session.exchanges.get(data.source) match {
             case Some(exchange) =>
-              val (fills, userData) = exchange.update(session)
+              val (fills, userData) = exchange.update(session, data)
               def acc(currency: String) = Account(data.source, currency)
 
               userData.foldLeft((newIds, newActions)) {
+                /**
+                  * Either market or limit order received by the exchange. Associate the client id
+                  * with the exchange id. Do not close any actions yet. Wait until the order is
+                  * open, in the case of limit order, or done if it's a market order.
+                  */
                 case ((is, as), Received(id, _, clientId, _)) =>
                   (is.receivedOrder(clientId.get, id), as)
+
+                /**
+                  * Limit order is opened on the exchange. Close the action that submitted it.
+                  */
                 case ((is, as), Open(id, _, _, _, _)) =>
-                  (is, closeTxForOrderId(as, is, id))
-                case ((is, as), Done(id, p, _, reason, _, _)) =>
-                  (is.orderComplete(id), reason match {
-                    case Canceled => closeTxForOrderId(as, is, id)
-                    case Filled => closeTxForOrderId(as, is, id)
-                    case _ => as
-                  })
+                  (is, closeActionForOrderId(as, is, id))
+
+                /**
+                  * Either market or limit order is done. Could be due to a fill, or a cancel.
+                  * Disassociate the ids to keep memory bounded in the ids manager. Also close the
+                  * action for the order id.
+                  */
+                case ((is, as), Done(id, _, _, _, _, _)) =>
+                  (is.orderComplete(id), closeActionForOrderId(as, is, id))
+
               } match { case (_newIds, _newActions) =>
                   newIds = _newIds
                   newActions = _newActions
@@ -294,20 +312,20 @@ class TradingEngine(dataDir: String,
             case ActionQueue(None, next +: rest) =>
               newActions = ActionQueue(Some(next), rest)
               next match {
-                case PostMarketOrder(id, targetId, pair, side, percent) =>
+                case PostMarketOrder(clientId, targetId, pair, side, percent) =>
                   val exName = exchangeNameForTargetId(targetId)
-                  newIds = newIds.initOrder(targetId, id)
+                  newIds = newIds.initOrder(targetId, clientId)
                   session.exchanges(exName)
-                    .order(MarketOrderRequest(id, side, pair,
+                    .order(MarketOrderRequest(clientId, side, pair,
                       if (side == Buy) None else Some(pPair(exName, pair).amount(Quote, percent)),
                       if (side == Sell) None else Some(pPair(exName, pair).amount(Base, percent))
                     ))
 
-                case PostLimitOrder(id, targetId, pair, side, percent, price) =>
+                case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
                   val exName = exchangeNameForTargetId(targetId)
-                  newIds = newIds.initOrder(targetId, id)
+                  newIds = newIds.initOrder(targetId, clientId)
                   session.exchanges(exName)
-                    .order(LimitOrderRequest(id, side, pair,
+                    .order(LimitOrderRequest(clientId, side, pair,
                       BigDecimal(price).setScale(quoteIncr(pair.quote),
                         if (side == Buy) BigDecimal.RoundingMode.CEILING
                         else BigDecimal.RoundingMode.FLOOR).doubleValue,
@@ -318,6 +336,7 @@ class TradingEngine(dataDir: String,
                   session.exchanges(exchangeNameForTargetId(targetId))
                     .cancel(ids.actualIdForTargetId(targetId))
               }
+            case _ =>
           }
 
           session.copy(
@@ -329,13 +348,14 @@ class TradingEngine(dataDir: String,
             sessionEvents = newSessionEvents
           )
         }
+        .drop(1)
         .runForeach { s =>
           s.sessionEvents.foreach(sessionEventsRef ! _)
         }
         .onComplete {
           case Success(_) =>
             println("success")
-            sessionEventsRef ! Status.Success
+            sessionEventsRef ! PoisonPill
           case Failure(err) =>
             println("fail")
             sessionEventsRef ! PoisonPill
@@ -379,29 +399,41 @@ class TradingEngine(dataDir: String,
         */
       case BacktestQuery(strategyName, params, timeRange) =>
 
-        // TODO: Handle parse errors
-        val paramsJson = parse(params).right.get
-        val emptyReport = Report(
-          strategyName,
-          params,
-          timeRange,
-          done = true,
-          Vector(),
-          Map.empty
-        )
+        try {
+          // TODO: Handle parse errors
+          val paramsJson = parse(params).right.get
+          val emptyReport = Report(
+            strategyName,
+            params,
+            timeRange,
+            done = true,
+            Vector(),
+            Map.empty
+          )
 
-        val (ref: ActorRef, fut: Future[Report]) =
-          Source.actorRef[SessionEvent](Int.MaxValue, OverflowStrategy.fail)
-            .toMat(Sink.fold(emptyReport) {
-              case (memo, TradeEvent(t)) => memo.copy(
-                trades = memo.trades :+ t
-              )
-            })(Keep.both)
-            .run
+          val (ref: ActorRef, fut: Future[Report]) =
+            Source.actorRef[SessionEvent](Int.MaxValue, OverflowStrategy.fail)
+              .toMat(Sink.fold(emptyReport) {
+                case (memo, TradeEvent(t)) => memo.copy(
+                  trades = memo.trades :+ t
+                )
+              })(Keep.both)
+              .run
 
-        processCommand(StartTradingSession(strategyName, paramsJson, Backtest(timeRange), ref))
+          processCommand(StartTradingSession(strategyName,
+            paramsJson, Backtest(timeRange), ref)) match {
+            case Left(err: EngineError) =>
+              throw err
+            case Right(events: Seq[Event]) =>
+              events.foreach(println)
+          }
 
-        fut pipeTo sender
+          fut pipeTo sender
+        } catch {
+          case err: Throwable =>
+            log.error("Uncaught error during backtesting", err)
+            throw err
+        }
 
       case _ => sender ! EngineError("Unsupported query type")
     }
@@ -418,6 +450,7 @@ class TradingEngine(dataDir: String,
             }
           }
       }
+
   }
 
   /**
@@ -508,7 +541,7 @@ object TradingEngine {
     def actualIdForTargetId(targetId: String): String = targetToActual(targetId)
   }
 
-  def closeTxForOrderId(actions: ActionQueue, ids: IdManager, id: String): ActionQueue =
+  def closeActionForOrderId(actions: ActionQueue, ids: IdManager, id: String): ActionQueue =
     actions match {
       case ActionQueue(Some(action), _) if ids.actualIdForTargetId(action.targetId) == id =>
         actions.closeActive
