@@ -23,6 +23,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
 
   private var apiRequestQueue = Queue.empty[APIRequest]
 
+  private var myOrders = Map.empty[Pair, OrderBook]
+
   private var depths = Map.empty[Pair, AggBook]
   private var prices = Map.empty[Pair, Double]
 
@@ -36,13 +38,48 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
     var events = Seq.empty[OrderEvent]
 
     // Dequeue and process API requests that have passed the latency threshold
+    while (apiRequestQueue.headOption.exists(_.requestTime + latencyMicros < data.micros)) {
+      apiRequestQueue.dequeue match {
+        case (r: APIRequest, rest) =>
+          r match {
+            case OrderReq(requestTime, req) => req match {
+              /**
+                * Limit orders may be filled (fully or partially) immediately. If not immediately
+                * fully filled, the remainder is placed on the resting order book.
+                */
+              case LimitOrderRequest(clientOid, side, product, price, size) =>
+
+              /**
+                * Market orders need to be filled immediately.
+                */
+              case MarketOrderRequest(clientOid, side, product, size, funds) =>
+            }
+
+            /**
+              * Removes the identified order from the resting order book.
+              */
+            case CancelReq(_, id) =>
+              myOrders.foreach {
+                case (product, book) if book.orders.contains(id) =>
+                  val order = book.orders(id)
+                  myOrders = myOrders + (product -> book.done(id))
+                  events = events :+ Done(id, product, order.side, Canceled,
+                    order.price, Some(order.amount))
+                case _ =>
+              }
+          }
+          apiRequestQueue = rest
+      }
+    }
 
     // Update the current time
     currentTimeMicros = data.micros
 
     // Update latest depth/pricing data
     data match {
-      case md: OrderBookMD[_] => ???
+      case md: OrderBookMD[_] =>
+        // TODO: Turn aggregate full order books into aggregate depths here
+        ???
       case md: AggBookMD =>
         depths = depths + (md.product -> md.data)
       case md: TradeMD =>
