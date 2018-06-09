@@ -21,7 +21,9 @@ object TradingSession {
   case class TradingSessionRecord(id: String,
                                   strategy: String,
                                   strategyParams: Json,
-                                  mode: Mode)
+                                  mode: Mode,
+                                  makerFeeOpt: Option[Double],
+                                  takerFeeOpt: Option[Double])
 }
 
 trait TradingSession {

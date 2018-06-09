@@ -2,6 +2,9 @@ package api
 
 import core._
 import core.TradingEngine.{BacktestQuery, Ping, Pong, Report}
+import io.circe.{Json, JsonNumber}
+import io.circe.parser._
+import io.circe.syntax._
 import sangria.schema._
 import sangria.macros.derive._
 import sangria.marshalling.FromInput
@@ -25,20 +28,40 @@ object GraphQLSchema {
     case class ExchangeBalances(exchange: String, accounts: List[AccountBalances])
     val ExchangeBalancesType = deriveObjectType[UserCtx, ExchangeBalances]()
 
+//    case class BalanceSeries(name: String, data: Vector[Double])
+//    val BalanceSeriesType = deriveObjectType[UserCtx, BalanceSeries]()
+//
+//    case class PriceSeries(name: String, data: Vector[Double])
+//    val PriceSeriesType = deriveObjectType[UserCtx, BalanceSeries]()
+
+    case class TimeSeries(name: String, data: Vector[Option[Double]])
+    val TimeSeriesType = deriveObjectType[UserCtx, TimeSeries]()
+
     val ReportType = ObjectType("Report",
-      "A full trading session report",
+      "A trading session report",
       fields[UserCtx, Report](
         Field("strategy", StringType, resolve = c => c.value.strategy),
         Field("params", StringType, resolve = c => c.value.params),
         Field("time_range", TimeRangeType, resolve = c => c.value.timeRange),
         Field("done", BooleanType, resolve = c => c.value.done),
         Field("trades", ListType(TradeType), resolve = c => c.value.trades),
-        Field("balances", ListType(ExchangeBalancesType), resolve = c =>
-          c.value.balances.toList.map { case (exchange, accounts) =>
-            ExchangeBalances(exchange, accounts.toList.map { case (acc, balances) =>
-                AccountBalances(acc, balances)
-            })
-          })
+
+        Field("time_series", ListType(TimeSeriesType),
+          resolve = c => c.value.timeSeries.map {
+            case (k, v) => TimeSeries(k, v.values.map(Some(_)))
+          }.toSeq)
+
+//        Field("balances", ListType(BalanceSeriesType), resolve = c =>
+//          c.value.balances.map {
+//            case (name, points) =>
+//              BalanceSeries(name, points.map(_.balance))}),
+//
+//        Field("prices", ListType(PriceSeriesType), resolve = c =>
+//          c.value.prices.map {
+//            case (name, points) =>
+//              PriceSeries(name, points.map(_.price))
+//          }
+//        )
       ))
 
     val StrategyNameArg = Argument("strategy", StringType,
@@ -55,6 +78,9 @@ object GraphQLSchema {
 
     val BalancesArg = Argument("balances", StringType)
 
+    val MakerFeeArg = Argument("maker_fee", OptionInputType(FloatType))
+    val TakerFeeArg = Argument("taker_fee", OptionInputType(FloatType))
+
     val QueryType = ObjectType("Query", fields[UserCtx, Unit](
       /**
         * Ping the trading engine. Should resolve to a pong.
@@ -67,12 +93,15 @@ object GraphQLSchema {
         * by the server after the backtest completes.
         */
       Field("backtest", ReportType,
-        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg :: BalancesArg :: Nil,
+        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg :: BalancesArg ::
+          MakerFeeArg :: TakerFeeArg :: Nil,
         resolve = c => c.ctx.request[Report](BacktestQuery(
           c.arg(StrategyNameArg),
           c.arg(StrategyParamsArg),
           TimeRange(c.arg(FromArg), c.arg(ToArg)),
-          c.arg(BalancesArg)
+          c.arg(BalancesArg),
+          c.arg(MakerFeeArg),
+          c.arg(TakerFeeArg)
         )))
     ))
 
