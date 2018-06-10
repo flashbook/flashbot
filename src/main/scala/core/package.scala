@@ -9,16 +9,6 @@ package object core {
   type Ratio = Double // Between -1 and 1 inclusive
   type Percent = Double // Between 0 and 1 inclusive
 
-  sealed trait BarUnit
-  case object Seconds extends BarUnit
-  case object Minutes extends BarUnit
-  case object Hours extends BarUnit
-  case object Days extends BarUnit
-  case object Weeks extends BarUnit
-  case object Months extends BarUnit
-
-  case class BarSize(size: Int, unit: BarUnit)
-
   case class TimeRange(from: Long = 0, to: Long = Long.MaxValue)
 
   sealed trait PairRole

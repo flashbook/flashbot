@@ -1,5 +1,6 @@
 package core
 
+import core.TradingEngine.ReportEvent
 import io.circe.Json
 
 object TradingSession {
@@ -10,6 +11,7 @@ object TradingSession {
     def id: String = (exchangeName :: pair ::
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
+  case class SessionReportEvent(event: ReportEvent) extends Event
 
   def exchangeNameForTargetId(id: String): String = id.split(":").head
 

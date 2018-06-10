@@ -1,6 +1,6 @@
 package strategies
 
-import core.{BarSize, MarketData, Pair, Strategy, TradingSession}
+import core.{MarketData, Pair, Strategy, TradingSession}
 import io.circe.Json
 import io.circe.generic.auto._
 

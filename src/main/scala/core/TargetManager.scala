@@ -20,8 +20,8 @@ case class TargetManager(markets: Map[Pair, MarketTarget] = Map.empty) {
       val curr = markets.getOrElse(pair, MarketTarget()).ratio
       val diff = ratio - curr
       if (diff != 0)
-        (this, List(PostMarketOrder(randomUUID.toString, target.id, pair,
-          if (diff > 0) Buy else Sell, Math.abs(diff))))
+        (withMarketRatio(pair, ratio), List(PostMarketOrder(randomUUID.toString,
+          target.id, pair, if (diff > 0) Buy else Sell, Math.abs(diff))))
       else (this, List())
 
     case OrderTarget(_, ratio, pair, Some((_, price))) =>
@@ -63,6 +63,11 @@ case class TargetManager(markets: Map[Pair, MarketTarget] = Map.empty) {
   def withoutLT(pair: Pair, id: String): TargetManager = {
     val mt = markets.getOrElse(pair, MarketTarget())
     copy(markets = markets + (pair -> mt.copy(book = mt.book - id)))
+  }
+
+  def withMarketRatio(pair: Pair, ratio: core.Ratio): TargetManager = {
+    val mt = markets.getOrElse(pair, MarketTarget())
+    copy(markets = markets + (pair -> mt.copy(ratio = ratio)))
   }
 }
 

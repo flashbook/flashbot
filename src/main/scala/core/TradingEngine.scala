@@ -184,7 +184,7 @@ class TradingEngine(dataDir: String,
                          targetManager: TargetManager = TargetManager(),
                          ids: IdManager = IdManager(),
                          actions: ActionQueue = ActionQueue(),
-                         sessionEvents: Seq[SessionEvent] = Seq.empty) extends TradingSession {
+                         emittedReportEvents: Seq[ReportEvent] = Seq.empty) extends TradingSession {
 
         override val id: String = sessionId
 
@@ -192,6 +192,7 @@ class TradingEngine(dataDir: String,
           events.foreach(handleEvent)
 
         private var targets = Queue.empty[OrderTarget]
+        private var reportEvents = Queue.empty[ReportEvent]
 
         def handleEvent(event: TradingSession.Event): Unit = {
           currentStrategySeqNr match {
@@ -199,6 +200,10 @@ class TradingEngine(dataDir: String,
               event match {
                 case target: OrderTarget =>
                   targets = targets.enqueue(target)
+                case SessionReportEvent(event : GaugeEvent) =>
+                  // Gauge event coming from a strategy, so we'll prefix the name with "local" to
+                  // prevent naming conflicts.
+                  reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
                 case msg: LogMessage =>
                   // TODO: This should save to a time log, not log to stdout...
                   log.info(msg.message)
@@ -215,6 +220,12 @@ class TradingEngine(dataDir: String,
           val _targets = targets
           targets = Queue.empty
           _targets
+        }
+
+        def collectReportEvents: Seq[ReportEvent] = {
+          val _events = reportEvents
+          reportEvents = Queue.empty
+          _events
         }
       }
 
@@ -247,20 +258,21 @@ class TradingEngine(dataDir: String,
           currentStrategySeqNr = None
 
           val targets = session.collectTargets
+          var newReportEvents = session.collectReportEvents
+
           var newIds = ids
           var newActions = actions
           var newBalances = balances
           var newTM = tm
-          var newSessionEvents = Seq.empty[SessionEvent]
 
-          def emitSessionEvent(e: SessionEvent): Unit = {
-            newSessionEvents = newSessionEvents :+ e
+          def emitReportEvent(e: ReportEvent): Unit = {
+            newReportEvents = newReportEvents :+ e
           }
 
           // If this data has price info attached, emit that price info.
           data match {
             case pd: Priced => // I love pattern matching on types.
-              emitSessionEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
+              emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
             case _ =>
           }
 
@@ -320,37 +332,13 @@ class TradingEngine(dataDir: String,
                         (1 + buySign * feeOverride.getOrElse(fee)))))
 
                   // Emit a trade event when we see a fill
-                  emitSessionEvent(TradeEvent(exchangeKey, Trade(tradeId, createdAt, price, size)))
+                  emitReportEvent(TradeEvent(exchangeKey, Trade(tradeId, createdAt, price, size)))
 
                   // Also balance info
-                  emitSessionEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
-                  emitSessionEvent(BalanceEvent(acc(quote), ret(acc(quote)), createdAt))
+                  emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
+                  emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), createdAt))
 
                   ret
-
-
-                  // TODO: These commented out lines can be removed when no longer being used as
-                  // a reference
-
-//                case (bs, f @ Fill(_, tradeId, fee, Pair(base, quote), price, size,
-//                    createdAt, liquidity, Buy)) =>
-//                  newSessionEvents = newSessionEvents :+
-//                    TradeEvent(Trade(tradeId, createdAt, price, size))
-//                  bs + (
-//                    acc(base) -> (bs(acc(base)) + size),
-//                    acc(quote) -> (bs(acc(quote)) -
-//                      (price * size * (1 + feeOverride(liquidity).getOrElse(fee))))
-//                  )
-//
-//                case (bs, f @ Fill(_, tradeId, fee, Pair(base, quote), price, size,
-//                    createdAt, liquidity, Sell)) =>
-//                  newSessionEvents = newSessionEvents :+
-//                    TradeEvent(Trade(tradeId, createdAt, price, size))
-//                  bs + (
-//                    acc(base) -> (bs(acc(base)) - size),
-//                    acc(quote) -> (bs(acc(quote)) +
-//                      (price * size * (1 - feeOverride(liquidity).getOrElse(fee))))
-//                  )
               }
             case _ =>
           }
@@ -358,7 +346,7 @@ class TradingEngine(dataDir: String,
           // Send the order targets to the target manager and enqueue the actions emitted by it.
           targets.foldLeft((newActions, newTM)) {
             case ((as, ntm), target) =>
-              tm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
+              ntm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
           } match { case (_newActions, _newTM) =>
               newActions = _newActions
               newTM = _newTM
@@ -409,12 +397,12 @@ class TradingEngine(dataDir: String,
             targetManager = newTM,
             ids = newIds,
             actions = newActions,
-            sessionEvents = newSessionEvents
+            emittedReportEvents = newReportEvents
           )
         }
         .drop(1)
         .runForeach { s =>
-          s.sessionEvents.foreach(sessionEventsRef ! _)
+          s.emittedReportEvents.foreach(sessionEventsRef ! _)
         }
         .onComplete {
           case Success(_) =>
@@ -484,7 +472,7 @@ class TradingEngine(dataDir: String,
             }
 
           val (ref: ActorRef, fut: Future[Report]) =
-            Source.actorRef[SessionEvent](Int.MaxValue, OverflowStrategy.fail)
+            Source.actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
               .toMat(Sink.fold(emptyReport) {
 
                 /**
@@ -492,6 +480,13 @@ class TradingEngine(dataDir: String,
                   */
                 case (report, event @ TradeEvent(exchange, t)) =>
                   report.copy(trades = report.trades :+ t)
+
+                /**
+                  * Gauge the gauge event. Gauge is one of those words that stops looking like a
+                  * word the more you say it. Gauge. Try it ... gauge.
+                  */
+                case (report, event: GaugeEvent) =>
+                  report.processGaugeEvent[GaugeEvent](event.key, event, _.value)
 
                 /**
                   * A price was updated, process the related time series.
@@ -625,7 +620,7 @@ object TradingEngine {
                                             event: T,
                                             valueFn: T => Double): Report = {
       val emptyTimeSeries =
-        TimeSeriesState(timeRange.from, 5 minute, Vector.empty[T], None, Vector.empty)
+        TimeSeriesState(timeRange.from, 1 minute, Vector.empty[T], None, Vector.empty)
       copy(timeSeries = timeSeries + (name ->
         timeSeries.getOrElse(name, emptyTimeSeries).processEvent(event,
           (ps: Vector[Double], es: Vector[T]) => (ps, es) match {
@@ -655,18 +650,20 @@ object TradingEngine {
                             takerFeeOpt: Option[Double]) extends PersistedEvent
   case class SessionFuture(fut: Future[akka.Done]) extends Event
 
-  sealed trait SessionEvent extends Timestamped
-  case class TradeEvent(exchange: String, trade: Trade) extends SessionEvent {
+  sealed trait ReportEvent extends Timestamped
+  case class TradeEvent(exchange: String, trade: Trade) extends ReportEvent {
     override def micros: Long = trade.micros
   }
   case class PriceEvent(exchange: String,
                         product: Pair,
                         price: Double,
-                        micros: Long) extends SessionEvent
+                        micros: Long) extends ReportEvent
 
   case class BalanceEvent(account: Account,
                           balance: Double,
-                          micros: Long) extends SessionEvent
+                          micros: Long) extends ReportEvent
+
+  case class GaugeEvent(key: String, value: Double, micros: Long) extends ReportEvent
 
   final case class EngineError(private val message: String,
                                private val cause: Throwable = None.orNull)

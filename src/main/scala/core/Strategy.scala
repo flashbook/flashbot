@@ -3,7 +3,8 @@ package core
 import io.circe.Json
 import core.Utils.parseProductId
 import Strategy._
-import core.TradingSession.OrderTarget
+import core.TradingEngine.GaugeEvent
+import core.TradingSession.{OrderTarget, SessionReportEvent}
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -39,6 +40,11 @@ abstract class Strategy {
 
   def orderTargetRatio(target: Ratio, price: Double, name: String = "limit")
                       (implicit ctx: TradingSession): Unit = {
+  }
+
+  def metric(name: String, value: Double, micros: Long)
+            (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SessionReportEvent(GaugeEvent(name, value, micros)))
   }
 }
 
