@@ -21,11 +21,11 @@ class OrderRandomly extends Strategy {
   }
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = {
-    if (rand.nextInt(50) == 0) {
+//    if (rand.nextInt(10) == 0) {
       orderTargetRatio(
         _params.get.exchange,
         _params.get.market,
         if (rand.nextBoolean) 1 else -1)
-    }
+//    }
   }
 }
