@@ -110,13 +110,11 @@ object Main {
     if (opts.metricsPort != 0)
       metricsServer = Some(new HTTPServer(opts.metricsPort))
 
-
     opts.cmd match {
       case "ingest" =>
         val srcNames =
           if (opts.sources.isEmpty) flashbotConfig.data_sources.keySet
           else opts.sources
-
         srcNames.foreach(srcName => {
           val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
           actor ! (srcName, List(opts.dataPath, "sources").mkString("/"),

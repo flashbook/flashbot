@@ -22,6 +22,7 @@ class DualMovingAverageCrossover extends Strategy {
   case class Params(exchange: String,
                     market: String,
                     barSize: String,
+                    dmz: Double,
                     short: Int,
                     long: Int)
 
@@ -47,8 +48,10 @@ class DualMovingAverageCrossover extends Strategy {
 
         // Set the order targets
         val i = shortEMA.getTimeSeries.getEndIndex
-        val target = shortEMA.getValue(i) compareTo longEMA.getValue(i)
-        orderTargetRatio(params.get.exchange, product.toString, target)
+        val diff = shortEMA.getValue(i).doubleValue - longEMA.getValue(i).doubleValue
+        if (math.abs(diff) > params.get.dmz) {
+          orderTargetRatio(params.get.exchange, product.toString, if (diff > 0) 1 else -1)
+        }
 
         // Send indicators to report
         metric("short_ema", shortEMA.getValue(i).doubleValue(), data.micros)

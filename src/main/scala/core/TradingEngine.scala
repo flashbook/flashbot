@@ -364,6 +364,7 @@ class TradingEngine(dataDir: String,
             case ActionQueue(None, next +: rest) =>
               newActions = ActionQueue(Some(next), rest)
               next match {
+
                 case PostMarketOrder(clientId, targetId, pair, side, percent) =>
                   val exName = exchangeNameForTargetId(targetId)
                   newIds = newIds.initOrder(targetId, clientId)
@@ -713,6 +714,7 @@ object TradingEngine {
 
   case class PortfolioPair(p: Pair, amounts: (Double, Double), incr: Double) {
     case class CurrencyAmount(name: String, amount: Double)
+
     def base: CurrencyAmount = CurrencyAmount(p.base, amounts._1)
     def quote: CurrencyAmount = CurrencyAmount(p.quote, amounts._2)
 

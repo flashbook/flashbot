@@ -19,9 +19,11 @@ case class TargetManager(markets: Map[Pair, MarketTarget] = Map.empty) {
       // Market order target
       val curr = markets.getOrElse(pair, MarketTarget()).ratio
       val diff = ratio - curr
+      // If the difference is not zero, meaning the desired ratio and the current one are not
+      // identical, then we need to place a market order.
       if (diff != 0)
         (withMarketRatio(pair, ratio), List(PostMarketOrder(randomUUID.toString,
-          target.id, pair, if (diff > 0) Buy else Sell, Math.abs(diff))))
+          target.id, pair, if (diff > 0) Buy else Sell, Math.abs(diff) / 2)))
       else (this, List())
 
     case OrderTarget(_, ratio, pair, Some((_, price))) =>
