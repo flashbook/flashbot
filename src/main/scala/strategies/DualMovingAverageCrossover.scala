@@ -1,13 +1,9 @@
 package strategies
 
-import java.time.{Duration, Instant, ZoneOffset, ZonedDateTime}
-
 import core._
-import core.Utils.{parseDuration, parseProductId}
+import core.Utils.parseProductId
 import io.circe.Json
-import org.ta4j.core.{BaseTimeSeries, TimeSeries}
 import io.circe.generic.auto._
-import io.circe.syntax._
 import org.ta4j.core.indicators.EMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 
