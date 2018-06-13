@@ -355,9 +355,7 @@ class TradingEngine(dataDir: String,
           def pPair(exName: String, pair: Pair): PortfolioPair =
             PortfolioPair(pair, (
                 newBalances(Account(exName, pair.base)),
-                newBalances(Account(exName, pair.quote))),
-              // TODO: Hard coded ugly
-              if (pair.quote.toLowerCase == "btc") 0.00001 else 0.01)
+                newBalances(Account(exName, pair.quote))))
 
           // Here is where we tell the exchange to do stuff, like place or cancel orders.
           newActions match {
@@ -712,7 +710,7 @@ object TradingEngine {
       case _ => actions
     }
 
-  case class PortfolioPair(p: Pair, amounts: (Double, Double), incr: Double) {
+  case class PortfolioPair(p: Pair, amounts: (Double, Double)) {
     case class CurrencyAmount(name: String, amount: Double)
 
     def base: CurrencyAmount = CurrencyAmount(p.base, amounts._1)
@@ -728,12 +726,8 @@ object TradingEngine {
     }
   }
 
+  // TODO: These should really be configured or requested per-exchange
   def quoteIncr(currency: String): Int = if (currency == "BTC") 5 else 2
   def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
 
-//  def updateSeries[V <: Timestamped, U](series: Seq[U],
-//                                        barDuration: Duration,
-//                                        newItem: V,
-//                                        extractor: V => U): Seq[U] = {
-//  }
 }

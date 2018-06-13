@@ -2,6 +2,7 @@ package sources
 
 import java.io.File
 import java.net.URI
+import java.util.concurrent.Executors
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
@@ -30,7 +31,7 @@ import scala.util.{Failure, Success}
 class BinanceMarketDataSource extends DataSource {
 
   val SRC = "binance"
-  val BOOK_DEPTH = 1000
+  val BOOK_DEPTH = 100
   val MAX_PRODUCTS = 10000
   val SNAPSHOT_INTERVAL = 100000
 
@@ -39,6 +40,26 @@ class BinanceMarketDataSource extends DataSource {
                       dataTypes: Map[String, DataSource.DataTypeConfig])
                      (implicit system: ActorSystem,
                       mat: ActorMaterializer): Unit = {
+    implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
+
+    // Since we may be requesting data for hundreds of Binance symbols, we partition the
+    // topics (symbols) into parts and start them in stages. This will avoid rate limits.
+    topics.grouped(20).zipWithIndex.foreach { case (part, i) =>
+      Future {
+        Thread.sleep(1000 * 60 * i)
+        ingestPart(dataDir, part, dataTypes, i)
+      }
+    }
+  }
+
+  def ingestPart(dataDir: String,
+                 topics: Map[String, Json],
+                 dataTypes: Map[String, DataSource.DataTypeConfig],
+                 partNum: Int)
+                (implicit system: ActorSystem,
+                 mat: ActorMaterializer): Unit = {
+
+    println(s"ingesting part $partNum")
 
     val aggBookStream = Source
       .actorRef[(AggBookMD, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
@@ -55,7 +76,7 @@ class BinanceMarketDataSource extends DataSource {
 
       .recover {
         case err =>
-          println("error in agg book stream")
+          println(s"($partNum) error in agg book stream")
           throw err
       }
 
@@ -63,12 +84,12 @@ class BinanceMarketDataSource extends DataSource {
       .to(Sink.foreach {
         case (index, ((eventsLog, snapshotsLog), (book, event))) =>
           // Always save the event
-          println(index, event)
+//          println(index, event)
           eventsLog.enqueue(event)
 
           // Occasionally save the full state as a snapshot
           if (index % SNAPSHOT_INTERVAL == 0) {
-            println("saving snapshot")
+            println(s"($partNum) saving snapshot")
             snapshotsLog.enqueue(AggSnapshot(event.u, book))
           }
       }).run
@@ -89,7 +110,7 @@ class BinanceMarketDataSource extends DataSource {
 
       .recover {
         case err =>
-          println("error in depth update stream")
+          println(s"($partNum) error in depth update stream")
           throw err
       }
 
@@ -108,14 +129,14 @@ class BinanceMarketDataSource extends DataSource {
 
       .recover {
         case err =>
-          println("error in trade stream")
+          println(s"($partNum) error in trade stream")
           throw err
       }
 
       // Persist trades
       .to(Sink.foreach {
         case (timeLog, md) =>
-          println(md.topic, md.dataType, md.micros)
+//          println(md.topic, md.dataType, md.micros)
           timeLog.enqueue(md)
       }).run
 
@@ -128,7 +149,8 @@ class BinanceMarketDataSource extends DataSource {
             new BinanceEventsProvider[DepthUpdateEvent](
               "depth",
               topics.keySet.map(parseProductId),
-              depthUpdateStream ! (_, _)
+              depthUpdateStream ! (_, _),
+              s"${partNum}a"
             )
           ))
 
@@ -139,7 +161,8 @@ class BinanceMarketDataSource extends DataSource {
               topics.keySet.map(parseProductId),
               (product, t) =>
                 tradeStream ! TradeMD(SRC, product.toString,
-                  Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble))
+                  Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble)),
+              s"${partNum}b"
             )
           ))
 
@@ -249,14 +272,14 @@ class BinanceMarketDataSource extends DataSource {
     * because Binance shuts down single connections that are open for over 24 hours.
     */
   class BinanceEventsProvider[T <: RspBody]
-  (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit)
+  (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit, partNum: String)
   (implicit de: Decoder[T]) extends Actor with ActorLogging {
 
-    implicit val ec: ExecutionContext = context.dispatcher
+    implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
 
     case class StreamWrap[R <: RspBody](stream: String, data: R)
 
-    private val wsRotatePeriodMillis: Long = 1000 * 30
+    private val wsRotatePeriodMillis: Long = 1000 * 60 * 5
 
     private val symbols = products.foldLeft(Map.empty[String, Pair]) {
       case (memo, pair) => memo + ((pair.base + pair.quote) -> pair)
@@ -280,7 +303,7 @@ class BinanceMarketDataSource extends DataSource {
         } else if (rsp.timeMillis - lastRotation > wsRotatePeriodMillis) {
           lastRotation = rsp.timeMillis
           if (tempWebSocket.isDefined) {
-            throw new RuntimeException("WebSocket rotation error")
+            throw new RuntimeException(s"($partNum) WebSocket rotation error")
           }
 
           tempWebSocket = Some(connect())
@@ -294,19 +317,22 @@ class BinanceMarketDataSource extends DataSource {
 
       case "swap" =>
         if (tempWebSocket.isEmpty) {
-          throw new RuntimeException("WebSocket swap error")
+          throw new RuntimeException(s"($partNum) WebSocket swap error")
         }
 
+        println(s"($partNum) closing")
+        val now = System.currentTimeMillis()
         mainWebSocket.closeBlocking()
+        println(s"($partNum) closed [${System.currentTimeMillis() - now}]")
         mainWebSocket = tempWebSocket.get
         tempWebSocket = None
-        println("Swapped Binance WebSockets")
+        println(s"($partNum) Swapped Binance WebSockets")
 
       case "tick" =>
         mainWebSocket.sendPing()
-        println("ping")
+        println(s"($partNum) ping")
         Future {
-          Thread.sleep(4000)
+          Thread.sleep(5000)
           self ! "tick"
         }
     }
@@ -336,7 +362,7 @@ class BinanceMarketDataSource extends DataSource {
 
         override def onWebsocketPong(conn: WebSocket, f: Framedata): Unit = {
           super.onWebsocketPong(conn, f)
-          println("pong")
+          println(s"($partNum) pong")
         }
       }
       client.connectBlocking()
@@ -397,11 +423,13 @@ class BinanceMarketDataSource extends DataSource {
       }
     }
 
-    private def getSnapshot(p: Pair): Future[DepthSnapshotBody] =
+    private def getSnapshot(p: Pair): Future[DepthSnapshotBody] = {
+      println("getting snapshot")
       Http().singleRequest(HttpRequest(
         uri = "https://www.binance.com/api/v1/depth?" +
           s"symbol=${(p.base + p.quote).toUpperCase}&limit=$BOOK_DEPTH"
       )).flatMap(r => Unmarshal(r.entity).to[DepthSnapshotBody])
+    }
   }
 
   /*
