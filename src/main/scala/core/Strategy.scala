@@ -2,7 +2,7 @@ package core
 
 import io.circe.Json
 import core.Utils.parseProductId
-import Strategy._
+import core.DataSource.DataSourceConfig
 import core.TradingEngine.GaugeEvent
 import core.TradingSession.{OrderTarget, SessionReportEvent}
 
@@ -26,7 +26,8 @@ abstract class Strategy {
     * the `handleData` method. Each stream should complete when there is no more data, which auto
     * shuts down the strategy when all data streams complete.
     */
-  def initialize(params: Json): List[String]
+  def initialize(params: Json,
+                 dataSourceConfig: Map[String, DataSourceConfig]): List[String]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.

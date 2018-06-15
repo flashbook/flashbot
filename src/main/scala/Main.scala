@@ -34,7 +34,8 @@ object Main {
                   cmd: String = "",
                   config: File = DEFAULT_CONFIG_FILE,
                   name: String = "",
-                  sources: Seq[String] = List.empty)
+                  sources: Seq[String] = List.empty,
+                  topics: Seq[String] = List.empty)
 
   private val optsParser = new OptionParser[Opts]("flashbot") {
     head("flashbot", "0.1")
@@ -60,7 +61,9 @@ object Main {
       .children(
         opt[Seq[String]]('s', "sources")
           .action((x, c) => c.copy(sources = x))
-          .text("Comma separated list of data sources to ingest"))
+          .text("Comma separated list of data sources to ingest"),
+        opt[Seq[String]]('s', "topics")
+          .action((x, c) => c.copy(topics = x)))
 
     cmd("server").action((_, c) => c.copy(cmd = "server"))
       .text("Start a local trading server.")
@@ -117,8 +120,12 @@ object Main {
           else opts.sources
         srcNames.foreach(srcName => {
           val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
-          actor ! (srcName, List(opts.dataPath, "sources").mkString("/"),
-            flashbotConfig.data_sources(srcName))
+          actor ! (
+            srcName,
+            List(opts.dataPath, "sources").mkString("/"),
+            flashbotConfig.data_sources(srcName),
+            opts.topics
+          )
         })
 
       case "server" =>
@@ -126,7 +133,7 @@ object Main {
           Props(new TradingEngine(
             List(opts.dataPath, "sources").mkString("/"),
             flashbotConfig.strategies,
-            flashbotConfig.data_sources.mapValues(_.`class`),
+            flashbotConfig.data_sources,
             flashbotConfig.exchanges.mapValues(_.`class`))),
           "trading-engine"
         )

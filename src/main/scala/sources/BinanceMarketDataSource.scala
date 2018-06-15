@@ -183,25 +183,35 @@ class BinanceMarketDataSource extends DataSource {
 
         // Find the snapshot
         var state: Option[AggSnapshot] = None
-        for (book <- snapshotsLog.scanBackwards(_ => false)(snapshotsLog.close)) {
+        for (book <- snapshotsLog.scanBackwards(_ => state.isEmpty)(snapshotsLog.close)) {
           state = Some(book)
         }
+
+        println(state)
 
         if (state.isDefined) {
           val eventsLog =
             timeLog[DepthUpdateEvent](dataDir, parseProductId(topic), dataType + "/events")
-          for (event <- eventsLog.scan(state.get.lastUpdateId + 1, _.u, { event =>
+
+          // TODO: I think the scan `from` doesn't work, so just scanning from 0 here, UGLY and SLOW!
+          for (event <- eventsLog.scan[Long](0, _.u, { event =>
             val prevState = state
             val key = prevState.get.lastUpdateId + 1
             val foundNextEvent = event.U <= key && event.u >= key
+
             if (foundNextEvent) {
               state = Some(AggSnapshot(event.u, prevState.get.book.copy(
                 micros = event.micros,
                 data = applyPricePoints(prevState.get.book.data, event.b, event.a)
               )))
             }
-            foundNextEvent
-          })(eventsLog.close)) yield state.get.book
+            event.u < key || foundNextEvent
+            // TODO: I'm not closing the queues here, because there is some kind of bug
+            // where closing the queue throws errors because something else is reading.
+            // This needs to be fixed, and then the callback here can be eventsLog.close
+            // For now, we live with unclosed reading queues.
+          })(() => {})) yield state.get.book
+//          List().iterator
 
         } else {
           List().iterator

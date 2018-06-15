@@ -425,10 +425,12 @@
 
   "strategies": {
     "dmac": "strategies.DualMovingAverageCrossover",
+    "ema_gain": "strategies.ShortEMAGain",
     "signal": "strategies.ExternalSignal",
     "latency_arb": "strategies.LatencyArbitrage",
     "twitter_vol": "strategies.TwitterVolumeTrader",
-    "random": "strategies.OrderRandomly"
+    "random": "strategies.OrderRandomly",
+    "secret_a": "strategies.SecretA"
   },
 
   "currencies": {

@@ -140,6 +140,8 @@ object TimeLog {
         NoPollingReader
       )(onComplete)
 
+    def size: Long = queue.entryCount()
+
     def scan[U](from: U,
                 comparing: T => U,
                 shouldContinue: T => Boolean,

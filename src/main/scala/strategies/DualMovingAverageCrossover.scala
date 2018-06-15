@@ -1,5 +1,6 @@
 package strategies
 
+import core.DataSource.DataSourceConfig
 import core._
 import core.Utils.parseProductId
 import io.circe.Json
@@ -30,7 +31,8 @@ class DualMovingAverageCrossover extends Strategy {
   lazy val shortEMA = new EMAIndicator(closePrice, params.get.short)
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
 
-  override def initialize(jsonParams: Json): List[String] = {
+  override def initialize(jsonParams: Json,
+                          dataSourceConfigs: Map[String, DataSourceConfig]): List[String] = {
     params = Some(jsonParams.as[Params].right.get)
     ts.setPeriod(params.get.barSize)
     List(s"${params.get.exchange}/${params.get.market}/trades")

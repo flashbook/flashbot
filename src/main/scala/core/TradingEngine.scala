@@ -12,6 +12,7 @@ import akka.NotUsed
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action._
+import core.DataSource.DataSourceConfig
 import core.Order._
 import exchanges.Simulator
 
@@ -26,13 +27,16 @@ import scala.util.{Failure, Random, Success}
   */
 class TradingEngine(dataDir: String,
                     strategyClassNames: Map[String, String],
-                    dataSourceClassNames: Map[String, String],
+                    dataSourceConfigs: Map[String, DataSourceConfig],
                     exchangeClassNames: Map[String, String])
   extends PersistentActor with ActorLogging {
 
   implicit val system: ActorSystem = context.system
   implicit val mat: ActorMaterializer = Utils.buildMaterializer
   implicit val ec: ExecutionContext = system.dispatcher
+
+
+  val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
 
   import TradingEngine._
   import DataSource._
@@ -58,6 +62,7 @@ class TradingEngine(dataDir: String,
         initialBalances,
         (makerFeeOpt, takerFeeOpt)
     ) =>
+
       // Check that we have a config for the requested strategy.
       if (!strategyClassNames.isDefinedAt(strategyKey)) {
         return Left(EngineError(s"Unknown strategy: $strategyKey"))
@@ -91,7 +96,7 @@ class TradingEngine(dataDir: String,
       // Initialize the strategy and collect the data source addresses it returns
       var dataSourceAddresses = Seq.empty[Address]
       try {
-        dataSourceAddresses = strategyOpt.get.initialize(strategyParams).map(parseAddress)
+        dataSourceAddresses = strategyOpt.get.initialize(strategyParams, dataSourceConfigs).map(parseAddress)
       } catch {
         case err: Throwable =>
           return Left(EngineError(s"Strategy initialization error: $strategyKey", err))
@@ -326,8 +331,8 @@ class TradingEngine(dataDir: String,
                   }
 
                   val ret = bs + (
-                    acc(base) -> (bs(acc(base)) + buySign * size),
-                    acc(quote) -> (bs(acc(quote)) -
+                    acc(base) -> (bs.getOrElse(acc(base), 0.0) + buySign * size),
+                    acc(quote) -> (bs.getOrElse(acc(quote), 0.0) -
                       (buySign * price * size *
                         (1 + buySign * feeOverride.getOrElse(fee)))))
 
@@ -354,8 +359,8 @@ class TradingEngine(dataDir: String,
 
           def pPair(exName: String, pair: Pair): PortfolioPair =
             PortfolioPair(pair, (
-                newBalances(Account(exName, pair.base)),
-                newBalances(Account(exName, pair.quote))))
+                newBalances.getOrElse(Account(exName, pair.base), 0),
+                newBalances.getOrElse(Account(exName, pair.quote), 0)))
 
           // Here is where we tell the exchange to do stuff, like place or cancel orders.
           newActions match {
@@ -619,7 +624,7 @@ object TradingEngine {
                                             event: T,
                                             valueFn: T => Double): Report = {
       val emptyTimeSeries =
-        TimeSeriesState(timeRange.from, 1 minute, Vector.empty[T], None, Vector.empty)
+        TimeSeriesState(timeRange.from, 15 minutes, Vector.empty[T], None, Vector.empty)
       copy(timeSeries = timeSeries + (name ->
         timeSeries.getOrElse(name, emptyTimeSeries).processEvent(event,
           (ps: Vector[Double], es: Vector[T]) => (ps, es) match {

@@ -9,13 +9,11 @@ class IngestService extends Actor with ActorLogging {
   implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
   override def receive: Receive = {
-    case (name: String, dataDir: String, config: DataSource.DataSourceConfig) =>
-//      config.topics.foreach({ case (topicName, _) =>
-//        config.data_types.foreach({ case (typeName, _) =>
-//          log.info("Ingesting {}/{}/{}", name, topicName, typeName)
-//        })
-//      })
+    case (name: String, dataDir: String, config: DataSource.DataSourceConfig,
+        topicsWhitelist: Seq[String]) =>
+      val finalTopics = config.topics .filterKeys(key =>
+        topicsWhitelist.isEmpty || topicsWhitelist.contains(key))
       Class.forName(config.`class`).newInstance.asInstanceOf[DataSource]
-        .ingest(dataDir, config.topics, config.data_types)
+        .ingest(dataDir, finalTopics, config.data_types)
   }
 }

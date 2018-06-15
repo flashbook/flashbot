@@ -1,5 +1,6 @@
 package strategies
 
+import core.DataSource.DataSourceConfig
 import core.{MarketData, Strategy, TradingSession}
 import io.circe.Json
 
@@ -9,7 +10,8 @@ import io.circe.Json
   */
 class TwitterVolumeTrader extends Strategy {
   override def title: String = "Twitter Volume Trader"
-  override def initialize(params: Json): List[String] = ???
+  override def initialize(params: Json,
+                          dataSourceConfigs: Map[String, DataSourceConfig]): List[String] = ???
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = ???
 }
