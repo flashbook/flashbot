@@ -9,7 +9,6 @@ target
 flashbot_data
 flashbot_logs
 
-
 # dependencies
 webui/node_modules
 
@@ -32,4 +31,8 @@ yarn-error.log*
 
 .ipynb_checkpoints
 
+# strategies
 SecretA.scala
+
+# flashbook
+ops
