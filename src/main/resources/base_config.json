@@ -425,7 +425,7 @@
 
   "strategies": {
     "dmac": "strategies.DualMovingAverageCrossover",
-    "ema_gain": "strategies.ShortEMAGain",
+    "scalper": "strategies.Scalper",
     "signal": "strategies.ExternalSignal",
     "latency_arb": "strategies.LatencyArbitrage",
     "twitter_vol": "strategies.TwitterVolumeTrader",

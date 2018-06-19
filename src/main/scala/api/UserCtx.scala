@@ -11,7 +11,7 @@ import core.TradingEngine.{Command, Ping, Pong, Query, Response}
 import scala.concurrent.Await
 
 class UserCtx(engine: ActorRef) {
-  implicit val timeout: Timeout = Timeout(1 minute)
+  implicit val timeout: Timeout = Timeout(10 minutes)
 
   def ping: String = request[Pong.type](Ping).toString
 

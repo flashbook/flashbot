@@ -2,19 +2,20 @@ package strategies
 
 import core.DataSource.DataSourceConfig
 import core._
-import core.Utils.parseProductId
+import core.Utils.{parseProductId, parseDuration}
 import io.circe.Json
 import io.circe.generic.auto._
 import org.ta4j.core.indicators.EMAIndicator
 import org.ta4j.core.indicators.helpers.{ClosePriceIndicator, GainIndicator}
 
-class ShortEMAGain extends Strategy {
+class Scalper extends Strategy {
 
-  override def title: String = "Short EMA Gain Reversion"
+  override def title: String = "Scalper"
 
   case class Params(exchange: String,
                     market: String,
                     bar_size: String,
+                    limit: String,
                     short: Int,
                     long: Int,
                     stop: Double,
@@ -30,7 +31,7 @@ class ShortEMAGain extends Strategy {
   lazy val shortEmaGain = new GainIndicator(shortEMA)
 
   // TODO: Your target position should be provided by the framework as part of ctx
-  var entry: Option[Double] = None
+  var entry: Option[(Long, Double)] = None
 
   override def initialize(jsonParams: Json,
                           dataSourceConfig: Map[String, DataSourceConfig]): List[String] = {
@@ -51,11 +52,12 @@ class ShortEMAGain extends Strategy {
 
       if (entry.isDefined) {
         // Currently in position. Check for stop loss and take profit to see if we want to exit.
-        val returns = 1 - price / entry.get
+        val returns = 1 - price / entry.get._2
         val shouldTake = returns > 0 && returns > params.get.take
         val shouldStop = returns < 0 && -returns > params.get.stop
+        val timeLimitReached = (md.micros - entry.get._1) > parseDuration(params.get.limit).toMicros
 
-        if (shouldTake || shouldStop) {
+        if (shouldTake || shouldStop || timeLimitReached) {
           orderTargetRatio(params.get.exchange, product.toString, -1)
           entry = None
         }
@@ -66,7 +68,7 @@ class ShortEMAGain extends Strategy {
         // 2. Short EMA value is lower than long EMA
         if (shortGain > 0 && short < long) {
           orderTargetRatio(params.get.exchange, product.toString, 1)
-          entry = Some(price)
+          entry = Some(md.micros, price)
         }
       }
 

@@ -83,8 +83,9 @@ class BinanceMarketDataSource extends DataSource {
       // Persist books
       .to(Sink.foreach {
         case (index, ((eventsLog, snapshotsLog), (book, event))) =>
+
           // Always save the event
-//          println(index, event)
+          println(index, book.micros, event.U, event.u)
           eventsLog.enqueue(event)
 
           // Occasionally save the full state as a snapshot
@@ -106,7 +107,7 @@ class BinanceMarketDataSource extends DataSource {
 
       // Create one book depth provider per product
       .via(initResource(ev =>
-          system.actorOf(Props(new AggBookProvider(ev._1, aggBookStream ! (_, ev._2))))))
+          system.actorOf(Props(new AggBookProvider(ev._1, aggBookStream ! (_, _))))))
 
       .recover {
         case err =>
@@ -183,11 +184,20 @@ class BinanceMarketDataSource extends DataSource {
 
         // Find the snapshot
         var state: Option[AggSnapshot] = None
-        for (book <- snapshotsLog.scanBackwards(_ => state.isEmpty)(snapshotsLog.close)) {
-          state = Some(book)
+        for (book <- snapshotsLog.scan[Long](0, _.micros, _ => state.isEmpty)(snapshotsLog.close)) {
+          if (book.micros >= timeRange.from && book.micros < timeRange.to) {
+            state = Some(book)
+          }
+          println(state)
         }
 
-        println(state)
+//        for (book <- snapshotsLog.scanBackwards(_ => state.isEmpty)(snapshotsLog.close)) {
+//          // Turn book sides into TreeMaps
+//          state = Some(book)
+//          println(state.get.micros, state.get.lastUpdateId)
+////          state = Some(book).map(snap =>
+////            snap.copy(book = snap.book.copy(data = snap.book.data.convertToTreeMaps)))
+//        }
 
         if (state.isDefined) {
           val eventsLog =
@@ -195,16 +205,21 @@ class BinanceMarketDataSource extends DataSource {
 
           // TODO: I think the scan `from` doesn't work, so just scanning from 0 here, UGLY and SLOW!
           for (event <- eventsLog.scan[Long](0, _.u, { event =>
+
+//            println(event.U, event.u)
+
             val prevState = state
             val key = prevState.get.lastUpdateId + 1
             val foundNextEvent = event.U <= key && event.u >= key
 
             if (foundNextEvent) {
+              println("found next event")
               state = Some(AggSnapshot(event.u, prevState.get.book.copy(
                 micros = event.micros,
                 data = applyPricePoints(prevState.get.book.data, event.b, event.a)
               )))
             }
+
             event.u < key || foundNextEvent
             // TODO: I'm not closing the queues here, because there is some kind of bug
             // where closing the queue throws errors because something else is reading.
@@ -229,6 +244,7 @@ class BinanceMarketDataSource extends DataSource {
 
       case Some(_) =>
         throw new RuntimeException(s"Unsupported data type: $dataType")
+
       case None =>
         throw new RuntimeException(s"Unknown data type: $dataType")
     }
@@ -384,7 +400,9 @@ class BinanceMarketDataSource extends DataSource {
     * Turn a depth update event stream into a stream of aggregated order books by requesting
     * a depth snapshot for every product and playing the depth update events on top.
     */
-  class AggBookProvider(product: Pair, updateFn: AggBookMD => Unit) extends Actor {
+  class AggBookProvider(product: Pair,
+                        updateFn: (AggBookMD, DepthUpdateEvent) => Unit)
+    extends Actor {
 
     import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
     implicit val ec: ExecutionContext = context.dispatcher
@@ -426,7 +444,7 @@ class BinanceMarketDataSource extends DataSource {
         buffer.dequeue match { case (event, newBuffer) =>
           if (lastUpdateId.forall(_ < event.u)) {
             state = state.map(book => applyPricePoints(book, event.b, event.a))
-            updateFn(AggBookMD(SRC, product.toString, event.micros, state.get))
+            updateFn(AggBookMD(SRC, product.toString, event.micros, state.get), event)
           }
           buffer = newBuffer
         }

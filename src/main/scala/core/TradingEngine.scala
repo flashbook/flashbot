@@ -624,7 +624,7 @@ object TradingEngine {
                                             event: T,
                                             valueFn: T => Double): Report = {
       val emptyTimeSeries =
-        TimeSeriesState(timeRange.from, 15 minutes, Vector.empty[T], None, Vector.empty)
+        TimeSeriesState(timeRange.from, 1 seconds, Vector.empty[T], None, Vector.empty)
       copy(timeSeries = timeSeries + (name ->
         timeSeries.getOrElse(name, emptyTimeSeries).processEvent(event,
           (ps: Vector[Double], es: Vector[T]) => (ps, es) match {

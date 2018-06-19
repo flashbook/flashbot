@@ -30,7 +30,15 @@ object AggBook {
         case Ask =>
           copy(asks = updateMap(asks, priceLevel, quantity))
       }
+
+    def convertToTreeMaps: AggBook = copy(
+      asks = toTreeMap(asks),
+      bids = toTreeMap(bids)
+    )
   }
+
+  def toTreeMap(map: Map[Double, Double]): TreeMap[Double, Double] =
+    map.foldLeft(TreeMap.empty[Double, Double])(_ + _)
 
   def aggFillOrder(book: AggBook, side: Side, sizeOrFunds: Double): Seq[(Double, Double)] = {
     val bookSide = if (side == Buy) book.asks else book.bids
@@ -46,6 +54,8 @@ object AggBook {
         fills = fills :+ (price, min / price)
         remainingAmount = remainingAmount - min
       } else {
+        // TODO: Not multiplying price here ... something is wrong. I think fills needs
+        // to have min * price
         val min = math.min(remainingAmount, quantity)
         fills = fills :+ (price, min)
         remainingAmount = remainingAmount - min

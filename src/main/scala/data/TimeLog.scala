@@ -24,7 +24,7 @@ object TimeLog {
   class ResourceManager extends StoreFileListener {
     override def onReleased(cycle: Int, file: File): Unit = {
       // TODO: Do retention things here
-      println("file released", cycle, file)
+//      println("file released", cycle, file)
     }
   }
 
@@ -164,7 +164,7 @@ object TimeLog {
 //    }
 
     def close(): Unit = {
-      println("CLOSING")
+//      println("CLOSING")
       queue.close()
     }
 
@@ -250,8 +250,8 @@ object TimeLog {
       }
 
       val found: Long = findIt
-      println("found", found)
-      println(tailer.toStart.index, tailer.toEnd.index)
+//      println("found", found)
+//      println(tailer.toStart.index, tailer.toEnd.index)
 
       tailer.moveToIndex(found match {
         case -1 => 0
