@@ -100,7 +100,7 @@
         "trades": {
           "retention": "90d"
         },
-        "book_1000": {
+        "book_100": {
           "retention": "90d"
         }
       }

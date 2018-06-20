@@ -93,7 +93,7 @@ object Main {
     val opts = optsParser.parse(args, Opts()).get
 
     val baseConfig = parse(Source
-      .fromInputStream(getClass.getResourceAsStream("/base_config_2.json"))
+      .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
       .getLines.mkString).right.get.as[ConfigFile].right.get
 
     val flashbotConfig = baseConfig
