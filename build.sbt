@@ -1,3 +1,6 @@
+
+enablePlugins(JvmPlugin)
+
 lazy val sharedSettings = Seq(
   name := "flashbot",
   organization := "io.flashbook",
@@ -72,9 +75,17 @@ lazy val miscDeps = List(
 
 lazy val root = project.in(file("."))
   .settings(sharedSettings: _*)
+  .settings(assemblyJarName in assembly := "flashbot.jar")
+  .settings(assemblyMergeStrategy in assembly := (x => {
+    val defaultStrategy = (assemblyMergeStrategy in assembly).value
+    val orig = defaultStrategy(x)
+    orig match {
+      case MergeStrategy.deduplicate => MergeStrategy.first // scary
+      case other => other
+    }
+  }))
   .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
     dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
-
 
 
 // Hack to stop SBT from complaining
