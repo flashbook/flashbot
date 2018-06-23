@@ -32,7 +32,8 @@ class DualMovingAverageCrossover extends Strategy {
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
 
   override def initialize(jsonParams: Json,
-                          dataSourceConfigs: Map[String, DataSourceConfig]): List[String] = {
+                          dataSourceConfigs: Map[String, DataSourceConfig],
+                          initialBalances: Map[Account, Double]): List[String] = {
     params = Some(jsonParams.as[Params].right.get)
     ts.setPeriod(params.get.barSize)
     List(s"${params.get.exchange}/${params.get.market}/trades")

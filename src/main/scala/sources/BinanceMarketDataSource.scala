@@ -33,14 +33,15 @@ class BinanceMarketDataSource extends DataSource {
   val SRC = "binance"
   val BOOK_DEPTH = 100
   val MAX_PRODUCTS = 10000
-  val SNAPSHOT_INTERVAL = 100000
+  val SNAPSHOT_INTERVAL = 10000
 
   override def ingest(dataDir: String,
                       topics: Map[String, Json],
                       dataTypes: Map[String, DataSource.DataTypeConfig])
                      (implicit system: ActorSystem,
                       mat: ActorMaterializer): Unit = {
-    implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
+    implicit val ec: ExecutionContext =
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
 
     // Since we may be requesting data for hundreds of Binance symbols, we partition the
     // topics (symbols) into parts and start them in stages. This will avoid rate limits.
@@ -85,13 +86,13 @@ class BinanceMarketDataSource extends DataSource {
         case (index, ((eventsLog, snapshotsLog), (book, event))) =>
 
           // Always save the event
-          println(index, book.micros, event.U, event.u)
           eventsLog.enqueue(event)
+          println("saving event", event)
 
           // Occasionally save the full state as a snapshot
           if (index % SNAPSHOT_INTERVAL == 0) {
-            println(s"($partNum) saving snapshot")
             snapshotsLog.enqueue(AggSnapshot(event.u, book))
+            println("saving snapshot", AggSnapshot(event.u, book))
           }
       }).run
 
@@ -186,9 +187,9 @@ class BinanceMarketDataSource extends DataSource {
         var state: Option[AggSnapshot] = None
         for (book <- snapshotsLog.scan[Long](0, _.micros, _ => state.isEmpty)(snapshotsLog.close)) {
           if (book.micros >= timeRange.from && book.micros < timeRange.to) {
-            state = Some(book)
+            // Turn book sides into TreeMaps
+            state = Some(book.copy(book = book.book.copy(data = book.book.data.convertToTreeMaps)))
           }
-          println(state)
         }
 
 //        for (book <- snapshotsLog.scanBackwards(_ => state.isEmpty)(snapshotsLog.close)) {
@@ -206,14 +207,11 @@ class BinanceMarketDataSource extends DataSource {
           // TODO: I think the scan `from` doesn't work, so just scanning from 0 here, UGLY and SLOW!
           for (event <- eventsLog.scan[Long](0, _.u, { event =>
 
-//            println(event.U, event.u)
-
             val prevState = state
             val key = prevState.get.lastUpdateId + 1
             val foundNextEvent = event.U <= key && event.u >= key
 
             if (foundNextEvent) {
-              println("found next event")
               state = Some(AggSnapshot(event.u, prevState.get.book.copy(
                 micros = event.micros,
                 data = applyPricePoints(prevState.get.book.data, event.b, event.a)

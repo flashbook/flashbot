@@ -1,7 +1,7 @@
 package strategies
 
 import core.DataSource.DataSourceConfig
-import core.{MarketData, Pair, Strategy, TradingSession}
+import core._
 import io.circe.Json
 import io.circe.generic.auto._
 
@@ -17,7 +17,8 @@ class OrderRandomly extends Strategy {
   val rand = new Random
 
   override def initialize(params: Json,
-                          dataSourceConfigs: Map[String, DataSourceConfig]): List[String] = {
+                          dataSourceConfigs: Map[String, DataSourceConfig],
+                          initialBalances: Map[Account, Double]): List[String] = {
     _params = Some(params.as[Params].right.get)
     List(_params.get.exchange + "/" + _params.get.market + "/trades")
   }

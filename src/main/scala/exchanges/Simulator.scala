@@ -118,4 +118,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   override def cancel(id: String): Unit = {
     apiRequestQueue = apiRequestQueue.enqueue(CancelReq(currentTimeMicros, id))
   }
+
+  override def baseAssetPrecision(pair: Pair): Int = base.baseAssetPrecision(pair)
+
+  override def quoteAssetPrecision(pair: Pair): Int = base.quoteAssetPrecision(pair)
 }

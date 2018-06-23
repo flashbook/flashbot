@@ -27,7 +27,8 @@ abstract class Strategy {
     * shuts down the strategy when all data streams complete.
     */
   def initialize(params: Json,
-                 dataSourceConfig: Map[String, DataSourceConfig]): List[String]
+                 dataSourceConfig: Map[String, DataSourceConfig],
+                 initialBalances: Map[Account, Double]): List[String]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.

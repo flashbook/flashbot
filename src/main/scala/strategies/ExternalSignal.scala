@@ -1,7 +1,7 @@
 package strategies
 
 import core.DataSource.DataSourceConfig
-import core.{MarketData, Strategy, TradingSession}
+import core.{Account, MarketData, Strategy, TradingSession}
 import io.circe.Json
 
 /**
@@ -12,7 +12,8 @@ class ExternalSignal extends Strategy {
   override def title: String = "External Signal"
 
   override def initialize(jsonParams: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig]): List[String] = ???
+                          dataSourceConfig: Map[String, DataSourceConfig],
+                          initialBalances: Map[Account, Double]): List[String] = ???
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = ???
 }

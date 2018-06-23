@@ -14,6 +14,7 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action._
 import core.DataSource.DataSourceConfig
 import core.Order._
+import core.Utils.parseProductId
 import exchanges.Simulator
 
 import scala.collection.immutable.Queue
@@ -96,7 +97,9 @@ class TradingEngine(dataDir: String,
       // Initialize the strategy and collect the data source addresses it returns
       var dataSourceAddresses = Seq.empty[Address]
       try {
-        dataSourceAddresses = strategyOpt.get.initialize(strategyParams, dataSourceConfigs).map(parseAddress)
+        dataSourceAddresses = strategyOpt.get
+          .initialize(strategyParams, dataSourceConfigs, initialBalances)
+          .map(parseAddress)
       } catch {
         case err: Throwable =>
           return Left(EngineError(s"Strategy initialization error: $strategyKey", err))
@@ -164,8 +167,13 @@ class TradingEngine(dataDir: String,
         }
       }
 
+      val markets: Map[String, Set[Pair]] = dataSourceAddresses
+        .groupBy(_.srcKey)
+        .filterKeys(exchanges contains _)
+        .mapValues(_.map(_.topic).map(parseProductId).toSet)
+
       // Keep track of currencies, inferred from transaction requests.
-      var currencies = Map.empty[String, CurrencyConfig]
+//      var currencies = Map.empty[String, CurrencyConfig]
 
       // Initialize portfolio of accounts. When backtesting, we just use the initial balances
       // that were supplied to the session. When live trading we request balances from each
@@ -186,10 +194,23 @@ class TradingEngine(dataDir: String,
         */
       case class Session(seqNr: Long = 0,
                          balances: Map[Account, Double] = initialBalances,
-                         targetManager: TargetManager = TargetManager(),
-                         ids: IdManager = IdManager(),
-                         actions: ActionQueue = ActionQueue(),
-                         emittedReportEvents: Seq[ReportEvent] = Seq.empty) extends TradingSession {
+
+                         // Create a target manager for every exchange
+                         targetManagers: Map[String, TargetManager] = markets
+                           .map { case (e, ms) => (e, TargetManager.fromInitialMarketBalances(
+                             initialBalances.filterKeys(_.exchange == e),
+                             ms
+                           ))},
+
+                         // Create action queue for every exchange
+                         actionQueues: Map[String, ActionQueue] = markets
+                           .mapValues(_ => ActionQueue()),
+
+                         // Also an id manager per exchange
+                         ids: Map[String, IdManager] = markets.mapValues(_ => IdManager()),
+
+                         emittedReportEvents: Seq[ReportEvent] = Seq.empty)
+        extends TradingSession {
 
         override val id: String = sessionId
 
@@ -254,7 +275,7 @@ class TradingEngine(dataDir: String,
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
-        .scan(Session()) { case (session @ Session(seqNr, balances, tm, ids, actions, _), data) =>
+        .scan(Session()) { case (session @ Session(seqNr, balances, tm, actions, ids, _), data) =>
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
           // then lock the handleEvent method again.
@@ -285,9 +306,9 @@ class TradingEngine(dataDir: String,
           // from the relevant exchange.
           exchanges.get(data.source) match {
             case Some(exchange) =>
-              val exchangeKey = data.source
+              val ex = data.source
               val (fills, userData) = exchange.update(session, data)
-              def acc(currency: String) = Account(exchangeKey, currency)
+              def acc(currency: String) = Account(ex, currency)
 
               userData.foldLeft((newIds, newActions)) {
                 /**
@@ -296,21 +317,22 @@ class TradingEngine(dataDir: String,
                   * open, in the case of limit order, or done if it's a market order.
                   */
                 case ((is, as), Received(id, _, clientId, _)) =>
-                  (is.receivedOrder(clientId.get, id), as)
+                  (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
 
                 /**
                   * Limit order is opened on the exchange. Close the action that submitted it.
                   */
                 case ((is, as), Open(id, _, _, _, _)) =>
-                  (is, closeActionForOrderId(as, is, id))
+                  (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
 
                 /**
                   * Either market or limit order is done. Could be due to a fill, or a cancel.
-                  * Disassociate the ids to keep memory bounded in the ids manager. Also close the
-                  * action for the order id.
+                  * Disassociate the ids to keep memory bounded in the ids manager. Also close
+                  * the action for the order id.
                   */
                 case ((is, as), Done(id, _, _, _, _, _)) =>
-                  (is.orderComplete(id), closeActionForOrderId(as, is, id))
+                  (is.updated(ex, is(ex).orderComplete(id)),
+                    as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
 
               } match { case (_newIds, _newActions) =>
                   newIds = _newIds
@@ -330,14 +352,15 @@ class TradingEngine(dataDir: String,
                     case _ => None
                   }
 
+
                   val ret = bs + (
                     acc(base) -> (bs.getOrElse(acc(base), 0.0) + buySign * size),
-                    acc(quote) -> (bs.getOrElse(acc(quote), 0.0) -
-                      (buySign * price * size *
-                        (1 + buySign * feeOverride.getOrElse(fee)))))
+                    acc(quote) -> (bs(acc(quote)) -
+//                      (buySign * price * size * (1 + buySign * feeOverride.getOrElse(fee)))))
+                      (buySign * price * size * (1 + buySign * 0))))
 
                   // Emit a trade event when we see a fill
-                  emitReportEvent(TradeEvent(exchangeKey, Trade(tradeId, createdAt, price, size)))
+                  emitReportEvent(TradeEvent(ex, Trade(tradeId, createdAt, price, size)))
 
                   // Also balance info
                   emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
@@ -350,8 +373,13 @@ class TradingEngine(dataDir: String,
 
           // Send the order targets to the target manager and enqueue the actions emitted by it.
           targets.foldLeft((newActions, newTM)) {
-            case ((as, ntm), target) =>
-              ntm.step(target) match { case (_tm, actionsSeq) => (as.enqueue(actionsSeq), _tm)}
+            case ((as, ntm), target: OrderTarget) =>
+              ntm(target.exchangeName).step(target) match {
+                case (_tm, actionsSeq) => (
+                  as.updated(target.exchangeName, as(target.exchangeName).enqueue(actionsSeq)),
+                  ntm.updated(target.exchangeName, _tm)
+                )
+              }
           } match { case (_newActions, _newTM) =>
               newActions = _newActions
               newTM = _newTM
@@ -362,45 +390,47 @@ class TradingEngine(dataDir: String,
                 newBalances.getOrElse(Account(exName, pair.base), 0),
                 newBalances.getOrElse(Account(exName, pair.quote), 0)))
 
-          // Here is where we tell the exchange to do stuff, like place or cancel orders.
-          newActions match {
-            case ActionQueue(None, next +: rest) =>
-              newActions = ActionQueue(Some(next), rest)
-              next match {
+          // Here is where we tell the exchanges to do stuff, like place or cancel orders.
+          newActions.foreach { case (ex, acs) =>
+            acs match {
+              case ActionQueue(None, next +: rest) =>
+                newActions = newActions.updated(ex, ActionQueue(Some(next), rest))
+                next match {
 
-                case PostMarketOrder(clientId, targetId, pair, side, percent) =>
-                  val exName = exchangeNameForTargetId(targetId)
-                  newIds = newIds.initOrder(targetId, clientId)
-                  exchanges(exName)
-                    .order(MarketOrderRequest(clientId, side, pair,
-                      if (side == Buy) None else Some(pPair(exName, pair).amount(Base, percent)),
-                      if (side == Sell) None else Some(pPair(exName, pair).amount(Quote, percent))
-                    ))
+                  case PostMarketOrder(clientId, targetId, pair, side, percent) =>
+                    val exName = exchangeNameForTargetId(targetId)
+                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
+                    exchanges(exName)
+                      .order(MarketOrderRequest(clientId, side, pair,
+                        if (side == Buy) None else Some(pPair(exName, pair).amount(Base, percent)),
+                        if (side == Sell) None else Some(pPair(exName, pair).amount(Quote, percent))
+                      ))
 
-                case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
-                  val exName = exchangeNameForTargetId(targetId)
-                  newIds = newIds.initOrder(targetId, clientId)
-                  exchanges(exName)
-                    .order(LimitOrderRequest(clientId, side, pair,
-                      BigDecimal(price).setScale(quoteIncr(pair.quote),
-                        if (side == Buy) BigDecimal.RoundingMode.CEILING
-                        else BigDecimal.RoundingMode.FLOOR).doubleValue,
-                      pPair(exName, pair).amount(if (side == Buy) Quote else Base, percent)
-                    ))
+                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
+                    val exName = exchangeNameForTargetId(targetId)
+                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
+                    exchanges(exName)
+                      .order(LimitOrderRequest(clientId, side, pair,
+                        BigDecimal(price).setScale(quoteIncr(pair.quote),
+                          if (side == Buy) BigDecimal.RoundingMode.CEILING
+                          else BigDecimal.RoundingMode.FLOOR).doubleValue,
+                        pPair(exName, pair).amount(if (side == Buy) Quote else Base, percent)
+                      ))
 
-                case CancelLimitOrder(id, targetId, pair) =>
-                  exchanges(exchangeNameForTargetId(targetId))
-                    .cancel(ids.actualIdForTargetId(targetId))
-              }
-            case _ =>
+                  case CancelLimitOrder(id, targetId, pair) =>
+                    exchanges(exchangeNameForTargetId(targetId))
+                      .cancel(ids(ex).actualIdForTargetId(targetId))
+                }
+              case _ =>
+            }
           }
 
           session.copy(
             seqNr = seqNr + 1,
             balances = newBalances,
-            targetManager = newTM,
+            targetManagers = newTM,
             ids = newIds,
-            actions = newActions,
+            actionQueues = newActions,
             emittedReportEvents = newReportEvents
           )
         }

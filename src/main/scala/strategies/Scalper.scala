@@ -34,7 +34,8 @@ class Scalper extends Strategy {
   var entry: Option[(Long, Double)] = None
 
   override def initialize(jsonParams: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig]): List[String] = {
+                          dataSourceConfig: Map[String, DataSourceConfig],
+                          initialBalances: Map[Account, Double]): List[String] = {
     params = Some(jsonParams.as[Params].right.get)
     ts.setPeriod(params.get.bar_size)
     List(s"${params.get.exchange}/${params.get.market}/trades")

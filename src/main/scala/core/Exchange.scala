@@ -21,6 +21,9 @@ trait Exchange {
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
   def cancel(id: String): Unit
+
+  def baseAssetPrecision(pair: Pair): Int
+  def quoteAssetPrecision(pair: Pair): Int
 }
 
 sealed trait OrderRequest {
