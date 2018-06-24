@@ -344,31 +344,41 @@ class TradingEngine(dataDir: String,
                 case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
                     createdAt, liquidity, side)) =>
 
-                  val feeOverride: Option[Double] = (liquidity, makerFeeOpt, takerFeeOpt) match {
-                    case (Maker, f @ Some(makerFeeOverride), _) => f
-                    case (Taker, _, f @ Some(takerFeeOverride)) => f
-                    case _ => None
-                  }
+//                  val feeOverride: Option[Double] = (liquidity, makerFeeOpt, takerFeeOpt) match {
+//                    case (Maker, f @ Some(makerFeeOverride), _) => f
+//                    case (Taker, _, f @ Some(takerFeeOverride)) => f
+//                    case _ => None
+//                  }
 
                   val ret = side match {
                     /**
                       * If we just bought some BTC using USD, then the fee was already subtracted
                       * from the amount of available funds when determining the size of BTC filled.
                       * Simply add the filled size to the existing BTC balance for base. For quote,
-                      * subtract the size * price * fee.
+                      * it's a little more complicated. We need to reconstruct the original amount
+                      * of quote funds (total cost) that was used for the order.
+                      *
+                      * total_cost * (1 - fee) = size * price
                       */
-                    case Buy => bs + (
-                      acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
-                      acc(quote) -> (bs(acc(quote)) - size * price * (1 + fee))
-                    )
+                    case Buy =>
+                      // Cost without accounting for fees. This is what we pay the maker.
+                      val rawCost = size * price
+
+                      // Total quote currency paid out to both maker and exchange
+                      val totalCost = rawCost / (1 - fee)
+
+                      bs + (
+                        acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
+                        acc(quote) -> (bs(acc(quote)) - totalCost)
+                      )
 
                     /**
                       * If we just sold a certain amount of BTC for USD, then the fee is subtracted
                       * from the USD that is to be credited to our account balance.
                       */
                     case Sell => bs + (
-                      acc(base) -> (bs.getOrElse(acc(base), 0.0) - size),
-                      acc(quote) -> (bs(acc(quote)) + size * price * (1 - fee))
+                      acc(base) -> (bs(acc(base)) - size),
+                      acc(quote) -> (bs.getOrElse(acc(quote), 0.0) + size * price * (1 - fee))
                     )
                   }
 
