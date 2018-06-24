@@ -58,14 +58,15 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
               case MarketOrderRequest(clientOid, side, product, size, funds) =>
                 if (depths.isDefinedAt(product)) {
                   fills = fills ++
-                    aggFillOrder(depths(product), side, if (side == Buy) funds.get else size.get)
+                    aggFillOrder(depths(product), side,
+                      if (side == Buy) funds.get * (1 - takerFee) else size.get)
                       .map { case (price, quantity) => Fill(clientOid, clientOid, takerFee,
                         product, price, quantity, currentTimeMicros, Taker, side)}
 
                 } else if (prices.isDefinedAt(product)) {
                   // We may not have aggregate book data, in that case, simply use the last price.
                   fills = fills :+ Fill(clientOid, clientOid, takerFee, product, prices(product),
-                    if (side == Buy) funds.get / prices(product) else size.get,
+                    if (side == Buy) (funds.get * (1 - takerFee)) / prices(product) else size.get,
                     currentTimeMicros, Taker, side)
 
                 } else {

@@ -344,20 +344,33 @@ class TradingEngine(dataDir: String,
                 case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
                     createdAt, liquidity, side)) =>
 
-                  val buySign = if (side == Buy) 1 else -1
-
                   val feeOverride: Option[Double] = (liquidity, makerFeeOpt, takerFeeOpt) match {
                     case (Maker, f @ Some(makerFeeOverride), _) => f
                     case (Taker, _, f @ Some(takerFeeOverride)) => f
                     case _ => None
                   }
 
+                  val ret = side match {
+                    /**
+                      * If we just bought some BTC using USD, then the fee was already subtracted
+                      * from the amount of available funds when determining the size of BTC filled.
+                      * Simply add the filled size to the existing BTC balance for base. For quote,
+                      * subtract the size * price * fee.
+                      */
+                    case Buy => bs + (
+                      acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
+                      acc(quote) -> (bs(acc(quote)) - size * price * (1 + fee))
+                    )
 
-                  val ret = bs + (
-                    acc(base) -> (bs.getOrElse(acc(base), 0.0) + buySign * size),
-                    acc(quote) -> (bs(acc(quote)) -
-//                      (buySign * price * size * (1 + buySign * feeOverride.getOrElse(fee)))))
-                      (buySign * price * size * (1 + buySign * 0))))
+                    /**
+                      * If we just sold a certain amount of BTC for USD, then the fee is subtracted
+                      * from the USD that is to be credited to our account balance.
+                      */
+                    case Sell => bs + (
+                      acc(base) -> (bs.getOrElse(acc(base), 0.0) - size),
+                      acc(quote) -> (bs(acc(quote)) + size * price * (1 - fee))
+                    )
+                  }
 
                   // Emit a trade event when we see a fill
                   emitReportEvent(TradeEvent(ex, Trade(tradeId, createdAt, price, size)))
