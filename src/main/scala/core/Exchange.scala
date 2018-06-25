@@ -24,6 +24,8 @@ trait Exchange {
 
   def baseAssetPrecision(pair: Pair): Int
   def quoteAssetPrecision(pair: Pair): Int
+
+  def useFundsForMarketBuys: Boolean
 }
 
 sealed trait OrderRequest {

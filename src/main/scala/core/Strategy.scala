@@ -35,12 +35,12 @@ abstract class Strategy {
     */
   def handleData(data: MarketData)(implicit ctx: TradingSession)
 
-  def orderTargetRatio(exchangeName: String, product: String, target: Ratio)
+  def orderTargetRatio(exchangeName: String, product: String, target: Double)
                       (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(exchangeName, target, parseProductId(product), None))
   }
 
-  def orderTargetRatio(target: Ratio, price: Double, name: String = "limit")
+  def orderTargetRatio(target: Double, price: Double, name: String = "limit")
                       (implicit ctx: TradingSession): Unit = {
   }
 

@@ -1,7 +1,7 @@
 package core
 
 import core.MarketData.GenMD
-import core.Order.{Buy, Side}
+import core.Order.{Buy, Sell, Side}
 import core.Utils.parseProductId
 import io.circe.{KeyDecoder, KeyEncoder}
 import io.circe.generic.auto._
@@ -40,36 +40,67 @@ object AggBook {
   def toTreeMap(map: Map[Double, Double]): TreeMap[Double, Double] =
     map.foldLeft(TreeMap.empty[Double, Double])(_ + _)
 
-  def aggFillOrder(book: AggBook, side: Side, sizeOrFunds: Double): Seq[(Double, Double)] = {
-    val bookSide = if (side == Buy) book.asks else book.bids
-    val bookSideSeq = bookSide.asInstanceOf[TreeMap[Double, Double]].toSeq
-    // If looking at asks, sort by increasing, otherwise, decreasing
-    val bookSideIt = if (side == Buy) bookSideSeq.iterator else bookSideSeq.reverseIterator
-    var remainingAmount = sizeOrFunds
+  def aggFillOrder(book: AggBook, side: Side,
+                   sizeOpt: Option[Double], fundsOpt: Option[Double])
+    : Seq[(Double, Double)] = {
+
     var fills = Seq.empty[(Double, Double)]
-    while (remainingAmount > 0 && bookSideIt.hasNext) {
-      val (price, quantity) = bookSideIt.next
-      if (side == Buy) {
-        val min = math.min(remainingAmount, price * quantity)
-        fills = fills :+ (price, min / price)
-        remainingAmount = remainingAmount - min
-      } else {
-        // TODO: Not multiplying price here ... something is wrong. I think fills needs
-        // to have min * price
-        val min = math.min(remainingAmount, quantity)
-        fills = fills :+ (price, min)
-        remainingAmount = remainingAmount - min
-      }
+    (side, sizeOpt, fundsOpt) match {
+      case (Buy, None, Some(funds)) =>
+        val ladder = book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+        var remainingFunds = funds
+        while (remainingFunds > 0) {
+          if (!ladder.hasNext) {
+            throw new RuntimeException("Book not deep enough to fill order")
+          }
+          val (price, quantity) = ladder.next
+          val min = math.min(remainingFunds, price * quantity)
+          fills :+= (price, min / price)
+          remainingFunds -= min
+        }
+
+      case (Buy, Some(size), None) =>
+        val ladder = book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+        var remainingSize = size
+        while (remainingSize > 0) {
+          if (!ladder.hasNext) {
+            throw new RuntimeException("Book not deep enough to fill order")
+          }
+          val (price, quantity) = ladder.next
+          val min = math.min(remainingSize, quantity)
+          fills :+= (price, min)
+          remainingSize -= min
+        }
+
+      case (Sell, Some(size), None) =>
+        val ladder = book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.reverseIterator
+        var remainingSize = size
+        while (remainingSize > 0) {
+          if (!ladder.hasNext) {
+            throw new RuntimeException("Book not deep enough to fill order")
+          }
+          val (price, quantity) = ladder.next
+          val min = math.min(remainingSize, quantity)
+          fills :+= (price, min)
+          remainingSize -= min
+        }
     }
+
     fills
   }
 
   case class AggBookMD(source: String,
                        topic: String,
                        micros: Long,
-                       data: AggBook) extends GenMD[AggBook] {
+                       data: AggBook) extends GenMD[AggBook] with Priced {
     def dataType: String = s"book_${data.depth}"
     def product: Pair = parseProductId(topic)
+
+    override def exchange: String = source
+
+    override def price: Double =
+      (data.asks.asInstanceOf[TreeMap[Double, Double]].head._1 +
+        data.bids.asInstanceOf[TreeMap[Double, Double]].last._1) / 2
   }
 
   private def updateMap(map: Map[Double, Double],

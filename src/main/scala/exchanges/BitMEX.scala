@@ -18,4 +18,6 @@ class BitMEX extends Exchange {
   override def baseAssetPrecision(pair: Pair): Int = ???
 
   override def quoteAssetPrecision(pair: Pair): Int = ???
+
+  override def useFundsForMarketBuys: Boolean = ???
 }

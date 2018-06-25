@@ -20,7 +20,7 @@ import exchanges.Simulator
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 /**
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
@@ -172,9 +172,6 @@ class TradingEngine(dataDir: String,
         .filterKeys(exchanges contains _)
         .mapValues(_.map(_.topic).map(parseProductId).toSet)
 
-      // Keep track of currencies, inferred from transaction requests.
-//      var currencies = Map.empty[String, CurrencyConfig]
-
       // Initialize portfolio of accounts. When backtesting, we just use the initial balances
       // that were supplied to the session. When live trading we request balances from each
       // account via the exchange's API.
@@ -183,24 +180,15 @@ class TradingEngine(dataDir: String,
       val sessionId = UUID.randomUUID.toString
       var currentStrategySeqNr: Option[Long] = None
 
-      // Simulate exchanges unless we are in live trading mode
-//      val exchanges =
-//        if (mode == Live) loadedExchanges
-//        else loadedExchanges.mapValues(e => new Simulator(e, defaultLatencyMicros))
-
       /**
         * The trading session that we fold market data over. We pass the running session instance
         * to the strategy every time we call `handleData`.
         */
       case class Session(seqNr: Long = 0,
                          balances: Map[Account, Double] = initialBalances,
-
-                         // Create a target manager for every exchange
-                         targetManagers: Map[String, TargetManager] = markets
-                           .map { case (e, ms) => (e, TargetManager.fromInitialMarketBalances(
-                             initialBalances.filterKeys(_.exchange == e),
-                             ms
-                           ))},
+                         prices: Map[Market, Double] = Map.empty,
+                         orderManagers: Map[String, OrderManager] =
+                            markets.mapValues(_ => OrderManager()),
 
                          // Create action queue for every exchange
                          actionQueues: Map[String, ActionQueue] = markets
@@ -208,8 +196,8 @@ class TradingEngine(dataDir: String,
 
                          // Also an id manager per exchange
                          ids: Map[String, IdManager] = markets.mapValues(_ => IdManager()),
-
                          emittedReportEvents: Seq[ReportEvent] = Seq.empty)
+
         extends TradingSession {
 
         override val id: String = sessionId
@@ -226,10 +214,12 @@ class TradingEngine(dataDir: String,
               event match {
                 case target: OrderTarget =>
                   targets = targets.enqueue(target)
+
                 case SessionReportEvent(event : GaugeEvent) =>
-                  // Gauge event coming from a strategy, so we'll prefix the name with "local" to
-                  // prevent naming conflicts.
+                  // Gauge event coming from a strategy, so we'll prefix the name with "local"
+                  // to prevent naming conflicts.
                   reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
+
                 case msg: LogMessage =>
                   // TODO: This should save to a time log, not log to stdout...
                   log.info(msg.message)
@@ -275,7 +265,9 @@ class TradingEngine(dataDir: String,
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
-        .scan(Session()) { case (session @ Session(seqNr, balances, tm, actions, ids, _), data) =>
+        .scan(Session()) { case (session @ Session(seqNr, balances, prices, oms,
+            actions, ids, _), data) =>
+
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
           // then lock the handleEvent method again.
@@ -289,7 +281,8 @@ class TradingEngine(dataDir: String,
           var newIds = ids
           var newActions = actions
           var newBalances = balances
-          var newTM = tm
+          var newPrices = prices
+          var newOMs = oms
 
           def emitReportEvent(e: ReportEvent): Unit = {
             newReportEvents = newReportEvents :+ e
@@ -298,6 +291,7 @@ class TradingEngine(dataDir: String,
           // If this data has price info attached, emit that price info.
           data match {
             case pd: Priced => // I love pattern matching on types.
+              newPrices += (Market(pd.exchange, pd.product) -> pd.price)
               emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
             case _ =>
           }
@@ -339,16 +333,9 @@ class TradingEngine(dataDir: String,
                   newActions = _newActions
               }
 
-
               newBalances = fills.foldLeft(newBalances) {
                 case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
                     createdAt, liquidity, side)) =>
-
-//                  val feeOverride: Option[Double] = (liquidity, makerFeeOpt, takerFeeOpt) match {
-//                    case (Maker, f @ Some(makerFeeOverride), _) => f
-//                    case (Taker, _, f @ Some(takerFeeOverride)) => f
-//                    case _ => None
-//                  }
 
                   val ret = side match {
                     /**
@@ -394,55 +381,60 @@ class TradingEngine(dataDir: String,
             case _ =>
           }
 
-          // Send the order targets to the target manager and enqueue the actions emitted by it.
-          targets.foldLeft((newActions, newTM)) {
-            case ((as, ntm), target: OrderTarget) =>
-              ntm(target.exchangeName).step(target) match {
-                case (_tm, actionsSeq) => (
-                  as.updated(target.exchangeName, as(target.exchangeName).enqueue(actionsSeq)),
-                  ntm.updated(target.exchangeName, _tm)
-                )
-              }
-          } match { case (_newActions, _newTM) =>
-              newActions = _newActions
-              newTM = _newTM
+          // Send the order targets to the corresponding order manager.
+          targets.foreach { target =>
+            newOMs += (target.exchangeName ->
+              newOMs(target.exchangeName).submitTarget(target))
           }
 
-          def pPair(exName: String, pair: Pair): PortfolioPair =
-            PortfolioPair(pair, (
-                newBalances.getOrElse(Account(exName, pair.base), 0),
-                newBalances.getOrElse(Account(exName, pair.quote), 0)))
+          // If necessary, expand the next target into actions and enqueue them for each
+          // order manager.
+          newOMs.foreach {
+            case (ex, om) =>
+              om.enqueueActions(
+                exchanges(ex),
+                newActions(ex),
+                newBalances.filter(_._1.exchange == ex)
+                  .map { case (acc, value) => (acc.currency, value) },
+                newPrices.filter(_._1.exchange == ex)
+                  .map { case (market, value) => (market.product, value) }
+              ) match {
+                case (_om, _actions) =>
+                  newOMs += (ex -> _om)
+                  newActions += (ex -> _actions)
+              }
+          }
+
+//          def pPair(exName: String, pair: Pair): PortfolioPair =
+//            PortfolioPair(pair, (
+//                newBalances.getOrElse(Account(exName, pair.base), 0),
+//                newBalances.getOrElse(Account(exName, pair.quote), 0)))
 
           // Here is where we tell the exchanges to do stuff, like place or cancel orders.
           newActions.foreach { case (ex, acs) =>
             acs match {
               case ActionQueue(None, next +: rest) =>
-                newActions = newActions.updated(ex, ActionQueue(Some(next), rest))
+                newActions += (ex -> ActionQueue(Some(next), rest))
+
                 next match {
+                  case PostMarketOrder(clientId, targetId, pair, side, size, funds) =>
+                    newIds += (ex -> newIds(ex).initOrder(targetId, clientId))
+                    exchanges(ex).order(MarketOrderRequest(clientId, side, pair, size, funds))
+//                        if (side == Buy) None else Some(pPair(ex, pair).amount(Base, percent)),
+//                        if (side == Sell) None else Some(pPair(ex, pair).amount(Quote, percent))
 
-                  case PostMarketOrder(clientId, targetId, pair, side, percent) =>
-                    val exName = exchangeNameForTargetId(targetId)
-                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
-                    exchanges(exName)
-                      .order(MarketOrderRequest(clientId, side, pair,
-                        if (side == Buy) None else Some(pPair(exName, pair).amount(Base, percent)),
-                        if (side == Sell) None else Some(pPair(exName, pair).amount(Quote, percent))
-                      ))
-
-                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
-                    val exName = exchangeNameForTargetId(targetId)
-                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
-                    exchanges(exName)
-                      .order(LimitOrderRequest(clientId, side, pair,
-                        BigDecimal(price).setScale(quoteIncr(pair.quote),
-                          if (side == Buy) BigDecimal.RoundingMode.CEILING
-                          else BigDecimal.RoundingMode.FLOOR).doubleValue,
-                        pPair(exName, pair).amount(if (side == Buy) Quote else Base, percent)
-                      ))
+//                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
+//                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
+//                    exchanges(ex)
+//                      .order(LimitOrderRequest(clientId, side, pair,
+//                        BigDecimal(price).setScale(quoteIncr(pair.quote),
+//                          if (side == Buy) BigDecimal.RoundingMode.CEILING
+//                          else BigDecimal.RoundingMode.FLOOR).doubleValue,
+//                        pPair(ex, pair).amount(if (side == Buy) Quote else Base, percent)
+//                      ))
 
                   case CancelLimitOrder(id, targetId, pair) =>
-                    exchanges(exchangeNameForTargetId(targetId))
-                      .cancel(ids(ex).actualIdForTargetId(targetId))
+                    exchanges(ex).cancel(ids(ex).actualIdForTargetId(targetId))
                 }
               case _ =>
             }
@@ -451,9 +443,10 @@ class TradingEngine(dataDir: String,
           session.copy(
             seqNr = seqNr + 1,
             balances = newBalances,
-            targetManagers = newTM,
-            ids = newIds,
+            prices = newPrices,
+            orderManagers = newOMs,
             actionQueues = newActions,
+            ids = newIds,
             emittedReportEvents = newReportEvents
           )
         }
@@ -768,24 +761,23 @@ object TradingEngine {
       case _ => actions
     }
 
-  case class PortfolioPair(p: Pair, amounts: (Double, Double)) {
-    case class CurrencyAmount(name: String, amount: Double)
-
-    def base: CurrencyAmount = CurrencyAmount(p.base, amounts._1)
-    def quote: CurrencyAmount = CurrencyAmount(p.quote, amounts._2)
-
-    def amount(role: PairRole, ratio: Double): Double = role match {
-      case Base => BigDecimal(base.amount * ratio)
-        .setScale(sizeIncr(base.name), BigDecimal.RoundingMode.FLOOR)
-        .toDouble
-      case Quote => BigDecimal(quote.amount * ratio)
-        .setScale(sizeIncr(quote.name), BigDecimal.RoundingMode.FLOOR)
-        .toDouble
-    }
-  }
+//  case class PortfolioPair(p: Pair, amounts: (Double, Double)) {
+//    case class CurrencyAmount(name: String, amount: Double)
+//
+//    def base: CurrencyAmount = CurrencyAmount(p.base, amounts._1)
+//    def quote: CurrencyAmount = CurrencyAmount(p.quote, amounts._2)
+//
+//    def amount(role: PairRole, ratio: Double): Double = role match {
+//      case Base => BigDecimal(base.amount * ratio)
+//        .setScale(sizeIncr(base.name), BigDecimal.RoundingMode.FLOOR)
+//        .toDouble
+//      case Quote => BigDecimal(quote.amount * ratio)
+//        .setScale(sizeIncr(quote.name), BigDecimal.RoundingMode.FLOOR)
+//        .toDouble
+//    }
+//  }
 
   // TODO: These should really be configured or requested per-exchange
-  def quoteIncr(currency: String): Int = if (currency == "BTC") 5 else 2
-  def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
-
+//  def quoteIncr(currency: String): Int = if (currency == "BTC") 5 else 2
+//  def sizeIncr(currency: String): Int = if (currency == "USD") 2 else 6
 }

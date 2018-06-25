@@ -18,4 +18,6 @@ class Binance extends Exchange {
   override def baseAssetPrecision(pair: Pair): Int = 8
 
   override def quoteAssetPrecision(pair: Pair): Int = 8
+
+  override def useFundsForMarketBuys: Boolean = false
 }

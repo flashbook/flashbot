@@ -29,8 +29,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   private var depths = Map.empty[Pair, AggBook]
   private var prices = Map.empty[Pair, Double]
 
-  override def makerFee: Percent = base.makerFee
-  override def takerFee: Percent = base.takerFee
+  override def makerFee: Double = base.makerFee
+  override def takerFee: Double = base.takerFee
   override def formatPair(pair: Pair): String = base.formatPair(pair)
 
   override def update(session: TradingSession,
@@ -58,8 +58,7 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
               case MarketOrderRequest(clientOid, side, product, size, funds) =>
                 if (depths.isDefinedAt(product)) {
                   fills = fills ++
-                    aggFillOrder(depths(product), side,
-                      if (side == Buy) funds.get * (1 - takerFee) else size.get)
+                    aggFillOrder(depths(product), side, size, funds.map(_ * (1 - takerFee)))
                       .map { case (price, quantity) => Fill(clientOid, clientOid, takerFee,
                         product, price, quantity, currentTimeMicros, Taker, side)}
 
@@ -123,4 +122,6 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   override def baseAssetPrecision(pair: Pair): Int = base.baseAssetPrecision(pair)
 
   override def quoteAssetPrecision(pair: Pair): Int = base.quoteAssetPrecision(pair)
+
+  override def useFundsForMarketBuys: Boolean = base.useFundsForMarketBuys
 }

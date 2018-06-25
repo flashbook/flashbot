@@ -9,10 +9,11 @@ sealed trait Action {
 }
 
 object Action {
+
   case class PostMarketOrder(id: String, targetId: String, pair: Pair, side: Side,
-                             percent: Percent) extends Action
+                             size: Option[Double], funds: Option[Double]) extends Action
   case class PostLimitOrder(id: String, targetId: String, pair: Pair, side: Side,
-                            percent: Percent, price: Double) extends Action
+                            size: Double, price: Double) extends Action
   case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends Action
 
   case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
@@ -22,6 +23,8 @@ object Action {
     def closeActive: ActionQueue = active match {
       case Some(_) => copy(active = None)
     }
+    def isEmpty: Boolean = active.isEmpty && queue.isEmpty
+    def nonEmpty: Boolean = !isEmpty
   }
 
   //  trait ActionResponse
