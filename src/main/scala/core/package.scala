@@ -60,4 +60,6 @@ package object core {
   case class Account(exchange: String, currency: String)
 
   case class Market(exchange: String, product: Pair)
+
+  case class Tick(micros: Long, source: String, topic: String, dataType: String) extends MarketData
 }

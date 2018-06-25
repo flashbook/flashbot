@@ -106,6 +106,7 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
         depths = depths + (md.product -> md.data)
       case md: TradeMD =>
         prices = prices + (md.product -> md.data.price)
+      case _ =>
     }
 
     (fills, events)

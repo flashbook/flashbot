@@ -37,14 +37,15 @@ class TradingEngine(dataDir: String,
   implicit val ec: ExecutionContext = system.dispatcher
 
 
-  val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
+  val dataSourceClassNames: Map[String, String] =
+    dataSourceConfigs.mapValues(_.`class`) + ("internal" -> "sources.InternalDataSource")
 
   import TradingEngine._
   import DataSource._
   import scala.collection.immutable.Seq
 
   val snapshotInterval = 1000
-  val defaultLatencyMicros = 1000
+  val defaultLatencyMicros: Long = 10 * 1000
   var state = EngineState()
 
   override def persistenceId: String = "trading-engine"
@@ -168,8 +169,18 @@ class TradingEngine(dataDir: String,
       }
 
       val markets: Map[String, Set[Pair]] = dataSourceAddresses
+          .filter {
+            case Address(srcKey, topic, _) =>
+              var parseError = false
+              try {
+                parseProductId(topic)
+              } catch { case _ =>
+                parseError = true
+              }
+
+              exchanges.contains(srcKey) && !parseError
+          }
         .groupBy(_.srcKey)
-        .filterKeys(exchanges contains _)
         .mapValues(_.map(_.topic).map(parseProductId).toSet)
 
       // Initialize portfolio of accounts. When backtesting, we just use the initial balances
@@ -254,13 +265,14 @@ class TradingEngine(dataDir: String,
       dataSourceAddresses
         .groupBy(_.srcKey)
         .flatMap { case (key, addresses) =>
-          addresses.map { case Address(_, topic, dataType) =>
-            Source.fromIterator[MarketData](() =>
-              dataSources(key).stream(dataDir, topic, dataType, mode match {
-                case Backtest(range) => range
-                case _ => TimeRange()
-              }))
-          }}
+          addresses.map {
+            case Address(_, topic, dataType) =>
+              Source.fromIterator[MarketData](() =>
+                dataSources(key).stream(dataDir, topic, dataType, mode match {
+                  case Backtest(range) => range
+                  case _ => TimeRange()
+                }))
+            }}
         .reduce[Source[MarketData, NotUsed]](mode match {
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
@@ -370,7 +382,7 @@ class TradingEngine(dataDir: String,
                   }
 
                   // Emit a trade event when we see a fill
-                  emitReportEvent(TradeEvent(ex, Trade(tradeId, createdAt, price, size)))
+                  emitReportEvent(TradeEvent(tradeId, ex, pair.toString, createdAt, price, size))
 
                   // Also balance info
                   emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
@@ -405,11 +417,6 @@ class TradingEngine(dataDir: String,
               }
           }
 
-//          def pPair(exName: String, pair: Pair): PortfolioPair =
-//            PortfolioPair(pair, (
-//                newBalances.getOrElse(Account(exName, pair.base), 0),
-//                newBalances.getOrElse(Account(exName, pair.quote), 0)))
-
           // Here is where we tell the exchanges to do stuff, like place or cancel orders.
           newActions.foreach { case (ex, acs) =>
             acs match {
@@ -420,8 +427,6 @@ class TradingEngine(dataDir: String,
                   case PostMarketOrder(clientId, targetId, pair, side, size, funds) =>
                     newIds += (ex -> newIds(ex).initOrder(targetId, clientId))
                     exchanges(ex).order(MarketOrderRequest(clientId, side, pair, size, funds))
-//                        if (side == Buy) None else Some(pPair(ex, pair).amount(Base, percent)),
-//                        if (side == Sell) None else Some(pPair(ex, pair).amount(Quote, percent))
 
 //                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
 //                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
@@ -528,8 +533,8 @@ class TradingEngine(dataDir: String,
                 /**
                   * A trade occurred. Update the time and trades.
                   */
-                case (report, event @ TradeEvent(exchange, t)) =>
-                  report.copy(trades = report.trades :+ t)
+                case (report, event: TradeEvent) =>
+                  report.copy(trades = report.trades :+ event)
 
                 /**
                   * Gauge the gauge event. Gauge is one of those words that stops looking like a
@@ -660,7 +665,7 @@ object TradingEngine {
                     params: String,
                     timeRange: TimeRange,
                     done: Boolean,
-                    trades: Vector[Trade],
+                    trades: Vector[TradeEvent],
                     timeSeries: Map[String, TimeSeriesState])
     extends Response {
 
@@ -701,9 +706,12 @@ object TradingEngine {
   case class SessionFuture(fut: Future[akka.Done]) extends Event
 
   sealed trait ReportEvent extends Timestamped
-  case class TradeEvent(exchange: String, trade: Trade) extends ReportEvent {
-    override def micros: Long = trade.micros
-  }
+  case class TradeEvent(id: String,
+                        exchange: String,
+                        product: String,
+                        micros: Long,
+                        price: Double,
+                        size: Double) extends ReportEvent
   case class PriceEvent(exchange: String,
                         product: Pair,
                         price: Double,

@@ -1,7 +1,7 @@
 package api
 
 import core._
-import core.TradingEngine.{BacktestQuery, Ping, Pong, Report}
+import core.TradingEngine._
 import io.circe.{Json, JsonNumber}
 import io.circe.parser._
 import io.circe.syntax._
@@ -16,7 +16,7 @@ object GraphQLSchema {
     val TimeRangeInputType = deriveInputObjectType[TimeRange]()
     val TimeRangeType = deriveObjectType[UserCtx, TimeRange]()
 
-    val TradeType = deriveObjectType[UserCtx, Trade]()
+    val TradeType = deriveObjectType[UserCtx, TradeEvent]()
 
     implicit val PricePointType: ObjectType[Unit, PricePoint] =
       deriveObjectType[Unit, PricePoint]()

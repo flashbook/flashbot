@@ -2,7 +2,7 @@ package core
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.TimeUnit.{MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS}
+import java.util.concurrent.TimeUnit.{DAYS, HOURS, MILLISECONDS, MINUTES, SECONDS}
 
 import akka.NotUsed
 import akka.actor.ActorSystem
@@ -11,7 +11,7 @@ import akka.stream.scaladsl.Flow
 import io.circe.Decoder
 import io.circe.parser._
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.util.matching.Regex
 
 object Utils {
@@ -64,17 +64,17 @@ object Utils {
       Supervision.Stop
     })
 
-  val msFmt: Regex = raw"([0-9+])ms".r
-  val secondFmt: Regex = raw"([0-9+])s".r
-  val minuteFmt: Regex = raw"([0-9+])m".r
-  val hourFmt: Regex = raw"([0-9+])h".r
-  val dayFmt: Regex = raw"([0-9+])d".r
+  val msFmt: Regex = raw"([0-9]+)ms".r
+  val secondFmt: Regex = raw"([0-9]+)s".r
+  val minuteFmt: Regex = raw"([0-9]+)m".r
+  val hourFmt: Regex = raw"([0-9]+)h".r
+  val dayFmt: Regex = raw"([0-9]+)d".r
 
-  def parseDuration(str: String): Duration = str match {
-    case msFmt(len: String) => Duration(len.toInt, MILLISECONDS)
-    case secondFmt(len: String) => Duration(len.toInt, SECONDS)
-    case minuteFmt(len: String) => Duration(len.toInt, MINUTES)
-    case hourFmt(len: String) => Duration(len.toInt, HOURS)
-    case dayFmt(len: String) => Duration(len.toInt, DAYS)
+  def parseDuration(str: String): FiniteDuration = str match {
+    case msFmt(len: String) => FiniteDuration(len.toInt, MILLISECONDS)
+    case secondFmt(len: String) => FiniteDuration(len.toInt, SECONDS)
+    case minuteFmt(len: String) => FiniteDuration(len.toInt, MINUTES)
+    case hourFmt(len: String) => FiniteDuration(len.toInt, HOURS)
+    case dayFmt(len: String) => FiniteDuration(len.toInt, DAYS)
   }
 }
