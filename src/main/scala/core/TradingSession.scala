@@ -32,7 +32,6 @@ trait TradingSession {
   import TradingSession._
 
   def id: String
-//  def exchanges: Map[String, Exchange]
-
+  def balances: Map[Account, Double]
   def handleEvents(events: Event*): Unit
 }
