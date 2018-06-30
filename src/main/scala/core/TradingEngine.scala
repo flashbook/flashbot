@@ -16,6 +16,7 @@ import core.DataSource.DataSourceConfig
 import core.Order._
 import core.Utils.parseProductId
 import exchanges.Simulator
+import sources.InternalDataSource
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
@@ -37,8 +38,8 @@ class TradingEngine(dataDir: String,
   implicit val ec: ExecutionContext = system.dispatcher
 
 
-  val dataSourceClassNames: Map[String, String] =
-    dataSourceConfigs.mapValues(_.`class`) + ("internal" -> "sources.InternalDataSource")
+  val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
+//  dataSourceConfigs.mapValues(_.`class`) + ("internal" -> "sources.InternalDataSource")
 
   import TradingEngine._
   import DataSource._
@@ -112,6 +113,8 @@ class TradingEngine(dataDir: String,
           s"during initialization."))
       }
 
+      var tickRefOpt: Option[ActorRef] = None
+
       // Validate and load requested data sources.
       // Also load exchanges instances while we're at it.
       var dataSources = Map.empty[String, DataSource]
@@ -158,9 +161,13 @@ class TradingEngine(dataDir: String,
           }
 
           try {
+            val instance: Exchange = classOpt.get.newInstance
+            instance.setTickFn(() => {
+              tickRefOpt.foreach(_ ! Tick)
+            })
             exchanges = exchanges + (srcKey -> (
-              if (mode == Live) classOpt.get.newInstance
-              else new Simulator(classOpt.get.newInstance, defaultLatencyMicros)))
+              if (mode == Live) instance
+              else new Simulator(instance, defaultLatencyMicros)))
           } catch {
             case err: Throwable =>
               return Left(EngineError(s"Exchange instantiation error: $srcKey", err))
@@ -262,7 +269,7 @@ class TradingEngine(dataDir: String,
       // the strategy instance. If this trading session is a backtest then we merge the data
       // streams by time. But if this is a live trading session then data is sent first come,
       // first serve to keep latencies low.
-      dataSourceAddresses
+      val (tickRef, fut) = dataSourceAddresses
         .groupBy(_.srcKey)
         .flatMap { case (key, addresses) =>
           addresses.map {
@@ -277,8 +284,23 @@ class TradingEngine(dataDir: String,
           case Backtest(range) => _.mergeSorted(_)
           case _ => _.merge(_)
         })
+        .mergeMat(Source.actorRef[Tick](Int.MaxValue, OverflowStrategy.fail))(Keep.right)
         .scan(Session()) { case (session @ Session(seqNr, balances, prices, oms,
             actions, ids, _), data) =>
+
+          // Update the relevant exchange with the market data to collect fills and user data
+          var fills: Option[scala.Seq[Fill]] = None
+          var userData: Option[scala.Seq[OrderEvent]] = None
+          if (exchanges.isDefinedAt(data.source)) {
+            exchanges(data.source).collect(session, data) match {
+              case (_f, _d) =>
+                fills = Some(_f)
+                userData = Some(_d)
+            }
+          }
+
+          // The user data is relayed to the strategy as StrategyEvents
+          userData.foreach(_.foreach(strategy.handleEvent))
 
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
@@ -313,22 +335,21 @@ class TradingEngine(dataDir: String,
           exchanges.get(data.source) match {
             case Some(exchange) =>
               val ex = data.source
-              val (fills, userData) = exchange.update(session, data)
               def acc(currency: String) = Account(ex, currency)
 
-              userData.foldLeft((newIds, newActions)) {
+              userData.get.foldLeft((newIds, newActions)) {
                 /**
                   * Either market or limit order received by the exchange. Associate the client id
                   * with the exchange id. Do not close any actions yet. Wait until the order is
                   * open, in the case of limit order, or done if it's a market order.
                   */
-                case ((is, as), Received(id, _, clientId, _)) =>
+                case ((is, as), OrderReceived(id, _, clientId, _)) =>
                   (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
 
                 /**
                   * Limit order is opened on the exchange. Close the action that submitted it.
                   */
-                case ((is, as), Open(id, _, _, _, _)) =>
+                case ((is, as), OrderOpen(id, _, _, _, _)) =>
                   (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
 
                 /**
@@ -336,7 +357,7 @@ class TradingEngine(dataDir: String,
                   * Disassociate the ids to keep memory bounded in the ids manager. Also close
                   * the action for the order id.
                   */
-                case ((is, as), Done(id, _, _, _, _, _)) =>
+                case ((is, as), OrderDone(id, _, _, _, _, _)) =>
                   (is.updated(ex, is(ex).orderComplete(id)),
                     as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
 
@@ -345,7 +366,7 @@ class TradingEngine(dataDir: String,
                   newActions = _newActions
               }
 
-              newBalances = fills.foldLeft(newBalances) {
+              newBalances = fills.get.foldLeft(newBalances) {
                 case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
                     createdAt, liquidity, side)) =>
 
@@ -456,17 +477,22 @@ class TradingEngine(dataDir: String,
           )
         }
         .drop(1)
-        .runForeach { s =>
+        .toMat(Sink.foreach { s =>
           s.emittedReportEvents.foreach(sessionEventsRef ! _)
-        }
-        .onComplete {
-          case Success(_) =>
-            println("success")
-            sessionEventsRef ! PoisonPill
-          case Failure(err) =>
-            println("fail")
-            sessionEventsRef ! PoisonPill
-        }
+        })(Keep.both)
+        .run
+
+      // Allows exchanges to send ticks, so that we can react instantly to exchange events.
+      tickRefOpt = Some(tickRef)
+
+      fut.onComplete {
+        case Success(_) =>
+          println("success")
+          sessionEventsRef ! PoisonPill
+        case Failure(err) =>
+          println("fail")
+          sessionEventsRef ! PoisonPill
+      }
 
       val startedEvent = SessionStarted(sessionId, strategyKey, strategyParams, mode,
         makerFeeOpt, takerFeeOpt)

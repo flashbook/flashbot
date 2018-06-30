@@ -34,6 +34,24 @@ package object core {
     override def price: Double = data.price
   }
 
+  case class Ticker(micros: Long,
+                    bestBidPrice: Double,
+                    bestBidQuantity: Double,
+                    bestAskPrice: Double,
+                    bestAskQuantity: Double,
+                    lastTradePrice: Double,
+                    lastTradeId: Long) extends Timestamped
+
+  case class TickerMD(source: String, topic: String, data: Ticker)
+    extends GenMD[Ticker] with Priced {
+
+    override def micros: Long = data.micros
+    override def dataType: String = "tickers"
+    override def exchange: String = source
+    override def product: Pair = parseProductId(topic)
+    override def price: Double = data.lastTradePrice
+  }
+
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])
 
@@ -62,4 +80,6 @@ package object core {
   case class Market(exchange: String, product: Pair)
 
   case class Tick(micros: Long, source: String, topic: String, dataType: String) extends MarketData
+
+  trait StrategyEvent
 }

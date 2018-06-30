@@ -13,9 +13,9 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
   def isInitialized: Boolean = orders.nonEmpty
 
   def processOrderEvent(event: OrderEvent): OrderBook = event match {
-    case Open(orderId, p, price, size, side) => open(orderId, price, size, side)
-    case Done(orderId, p, side, reason, price, remainingSize) => done(orderId)
-    case Change(orderId, p, price, newSize) => change(orderId, newSize)
+    case OrderOpen(orderId, p, price, size, side) => open(orderId, price, size, side)
+    case OrderDone(orderId, p, side, reason, price, remainingSize) => done(orderId)
+    case OrderChange(orderId, p, price, newSize) => change(orderId, newSize)
     case _ => this
   }
 

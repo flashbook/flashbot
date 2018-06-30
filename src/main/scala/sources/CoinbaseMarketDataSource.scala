@@ -79,7 +79,7 @@ class CoinbaseMarketDataSource extends DataSource {
           // Persist trades separately. Derived from the same order book stream.
           if (dts.isDefinedAt(Trades)) {
             rawEvent.toOrderEvent match {
-              case Match(tradeId, product, time, size, price, _, _, _) =>
+              case OrderMatch(tradeId, product, time, size, price, _, _, _) =>
                 tradesQueue.enqueue(TradeMD(NAME, product.toString,
                   Trade(tradeId.toString, time, price, size)))
               case _ =>
@@ -301,18 +301,18 @@ class CoinbaseMarketDataSource extends DataSource {
     def toOrderEvent: OrderEvent = {
       `type` match {
         case "open" =>
-          Open(order_id.get, parseProductId(product_id), price.get, remaining_size.get,
+          OrderOpen(order_id.get, parseProductId(product_id), price.get, remaining_size.get,
             Side.parseSide(side.get))
         case "done" =>
-          Done(order_id.get, parseProductId(product_id), Side.parseSide(side.get),
+          OrderDone(order_id.get, parseProductId(product_id), Side.parseSide(side.get),
             DoneReason.parse(reason.get), price, remaining_size)
         case "change" =>
-          Change(order_id.get, parseProductId(product_id), price, new_size.get)
+          OrderChange(order_id.get, parseProductId(product_id), price, new_size.get)
         case "match" =>
-          Match(trade_id.get, parseProductId(product_id), micros, size.get, price.get,
+          OrderMatch(trade_id.get, parseProductId(product_id), micros, size.get, price.get,
             Side.parseSide(side.get), maker_order_id.get, taker_order_id.get)
         case "received" =>
-          Received(order_id.get, parseProductId(product_id), client_oid,
+          OrderReceived(order_id.get, parseProductId(product_id), client_oid,
             OrderType.parseOrderType(order_type.get))
       }
     }

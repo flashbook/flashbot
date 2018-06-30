@@ -10,10 +10,12 @@ class IngestService extends Actor with ActorLogging {
 
   override def receive: Receive = {
     case (name: String, dataDir: String, config: DataSource.DataSourceConfig,
-        topicsWhitelist: Seq[String]) =>
-      val finalTopics = config.topics .filterKeys(key =>
+        topicsWhitelist: Set[String], dataTypesWhitelist: Set[String]) =>
+      val finalTopics = config.topics.filterKeys(key =>
         topicsWhitelist.isEmpty || topicsWhitelist.contains(key))
+      val finalDataTypes = config.data_types.filterKeys(key =>
+        dataTypesWhitelist.isEmpty || dataTypesWhitelist.contains(key))
       Class.forName(config.`class`).newInstance.asInstanceOf[DataSource]
-        .ingest(dataDir, finalTopics, config.data_types)
+        .ingest(dataDir, finalTopics, finalDataTypes)
   }
 }

@@ -7,7 +7,14 @@ object Exchange {
   final case class ExchangeConfig(`class`: String)
 }
 
-trait Exchange {
+abstract class Exchange {
+
+  var tickFn: () => Unit = () => {}
+
+  def setTickFn(fn: () => Unit): Unit = {
+    tickFn = fn
+  }
+
   def makerFee: Double
   def takerFee: Double
   def formatPair(pair: Pair): String
@@ -16,7 +23,7 @@ trait Exchange {
     * A function that returns user data by the exchange in its current state for the given
     * trading session.
     */
-  def update(session: TradingSession, data: MarketData): (Seq[Fill], Seq[OrderEvent])
+  def collect(session: TradingSession, data: MarketData): (Seq[Fill], Seq[OrderEvent])
 
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit

@@ -13,7 +13,7 @@ import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import org.java_websocket.client.WebSocketClient
 import core.AggBook._
-import core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
+import core.DataSource._
 import core.Utils._
 import core.{AggBook => _, _}
 import data.TimeLog
@@ -43,12 +43,21 @@ class BinanceMarketDataSource extends DataSource {
     implicit val ec: ExecutionContext =
       ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
 
+    val tickerDataType = dataTypes.filterKeys(_ == "tickers")
+    val otherDataTypes = dataTypes.filterKeys(_ != "tickers")
+
+    // We're using the "!ticker@arr" stream, which includes all symbols, for tickers. So we don't
+    // need to batch for the "tickers" data type.
+    if (tickerDataType.nonEmpty) {
+      ingestPart(dataDir, topics, tickerDataType, 0)
+    }
+
     // Since we may be requesting data for hundreds of Binance symbols, we partition the
     // topics (symbols) into parts and start them in stages. This will avoid rate limits.
     topics.grouped(20).zipWithIndex.foreach { case (part, i) =>
       Future {
         Thread.sleep(1000 * 60 * i)
-        ingestPart(dataDir, part, dataTypes, i)
+        ingestPart(dataDir, part, otherDataTypes, i)
       }
     }
   }
@@ -59,8 +68,6 @@ class BinanceMarketDataSource extends DataSource {
                  partNum: Int)
                 (implicit system: ActorSystem,
                  mat: ActorMaterializer): Unit = {
-
-    println(s"ingesting part $partNum")
 
     val aggBookStream = Source
       .actorRef[(AggBookMD, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
@@ -87,12 +94,12 @@ class BinanceMarketDataSource extends DataSource {
 
           // Always save the event
           eventsLog.enqueue(event)
-          println("saving event", event)
+//          println("saving event", event)
 
           // Occasionally save the full state as a snapshot
           if (index % SNAPSHOT_INTERVAL == 0) {
             snapshotsLog.enqueue(AggSnapshot(event.u, book))
-            println("saving snapshot", AggSnapshot(event.u, book))
+//            println("saving snapshot", AggSnapshot(event.u, book))
           }
       }).run
 
@@ -142,10 +149,40 @@ class BinanceMarketDataSource extends DataSource {
           timeLog.enqueue(md)
       }).run
 
+    val tickersStream = Source
+      .actorRef[TickerMD](Int.MaxValue, OverflowStrategy.fail)
+      .groupBy(MAX_PRODUCTS, _.product)
+      .via(deDupeStream(_.data.lastTradeId))
+      .via(initResource(md => timeLog[TickerMD](dataDir, md.product, md.dataType)))
+      .recover {
+        case err =>
+          println(s"($partNum) error in ticker stream")
+          throw err
+      }
+      .to(Sink.foreach {
+        case (timeLog, md) =>
+//          println("saving ticker", md)
+          timeLog.enqueue(md)
+      }).run
+
     dataTypes
       .map { case (k, v) => (parseBuiltInDataType(k).get, v) }
       .keySet
       .foreach {
+        case Tickers =>
+          system.actorOf(Props(
+            new BinanceEventsProvider[TickerEvent](
+              "arr",
+              topics.keySet.map(parseProductId),
+              (product, t) =>
+                tickersStream ! TickerMD(SRC, product.toString, Ticker(t.micros,
+                  t.b.toDouble, t.B.toDouble, t.a.toDouble, t.A.toDouble,
+                  t.c.toDouble, t.L)),
+              s"${partNum}c",
+              (_, n) => s"ws/!ticker@$n"
+            )
+          ))
+
         case DepthBook(depth) =>
           system.actorOf(Props(
             new BinanceEventsProvider[DepthUpdateEvent](
@@ -245,6 +282,10 @@ class BinanceMarketDataSource extends DataSource {
             md.micros < timeRange.to
           })()
 
+      case Some(Tickers) =>
+        val tickersLog: TimeLog[TickerMD] = timeLog(dataDir, parseProductId(topic), dataType)
+        tickersLog.scan(timeRange.from, _.micros, _.micros < timeRange.to)()
+
       case Some(_) =>
         throw new RuntimeException(s"Unsupported data type: $dataType")
 
@@ -268,6 +309,35 @@ class BinanceMarketDataSource extends DataSource {
   sealed trait RspBody extends Timestamped {
     def timeMillis: Long
     def micros: Long = timeMillis * 1000
+    def symbol: String
+  }
+
+  case class TickerEvent(e: String,      // Event type
+                         E: Long,        // Event time
+                         s: String,      // Symbol
+                         p: String,      // Price change
+                         P: String,      // Price change percent
+                         w: String,      // Weighted average price
+                         x: String,      // Previous day's close price
+                         c: String,      // Current day's close price
+                         Q: String,      // Close trade's quantity
+                         b: String,      // Best bid price
+                         B: String,      // Best bid quantity
+                         a: String,      // Best ask price
+                         A: String,      // Best ask quantity
+                         o: String,      // Open price
+                         h: String,      // High price
+                         l: String,      // Low price
+                         v: String,      // Total traded base asset volume
+                         q: String,      // Total traded quote asset volume
+                         O: Long,        // Statistics open time
+                         C: Long,        // Statistics close time
+                         F: Long,        // First trade ID
+                         L: Long,        // Last trade Id
+                         n: Long         // Total number of trade
+  ) extends RspBody {
+    override def timeMillis: Long = E
+    override def symbol: String = s
   }
 
   case class TradeEvent(e: String, // Event type
@@ -283,6 +353,7 @@ class BinanceMarketDataSource extends DataSource {
                         M: Boolean // Unknown ... ignore
   ) extends RspBody {
     override def timeMillis: Long = E
+    override def symbol: String = s
   }
 
   case class DepthUpdateEvent(e: String,
@@ -294,17 +365,26 @@ class BinanceMarketDataSource extends DataSource {
                               a: Seq[Seq[Json]] // Ask updates
   ) extends RspBody {
     override def timeMillis: Long = E
+    override def symbol: String = s
   }
+
+  def defaultWSPath(symbols: Map[String, Pair], streamName: String): String =
+    "stream?streams=" + symbols.keySet.map(_ + "@" + streamName).mkString("/")
 
   /**
     * Collects events from the Binance WebSocket API. Rotates WebSocket connections periodically
     * because Binance shuts down single connections that are open for over 24 hours.
     */
-  class BinanceEventsProvider[T <: RspBody]
-  (streamName: String, products: Set[Pair], updateFn: (Pair, T) => Unit, partNum: String)
+  class BinanceEventsProvider[T <: RspBody](streamName: String,
+                                            products: Set[Pair],
+                                            updateFn: (Pair, T) => Unit,
+                                            partNum: String,
+                                            wsPath: (Map[String, Pair],
+                                              String) => String = defaultWSPath)
   (implicit de: Decoder[T]) extends Actor with ActorLogging {
 
-    implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
+    implicit val ec: ExecutionContext =
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
 
     case class StreamWrap[R <: RspBody](stream: String, data: R)
 
@@ -321,16 +401,23 @@ class BinanceMarketDataSource extends DataSource {
     self ! "tick"
 
     override def receive: Receive = {
+
       // Incoming message from a websocket
-      case StreamWrap(stream: String, rsp: T) =>
-        // Send it to the update function
-        updateFn(symbols(stream.split('@').head), rsp)
+      case rsp: T =>
+         // Send it to the update function
+        val prod = symbols.get(rsp.symbol.toLowerCase)
+        if (prod.isEmpty) {
+          log.warning(s"Skipping ${rsp.symbol} ticker ingest")
+        } else if (products contains prod.get) {
+          updateFn(prod.get, rsp)
+        }
 
         // Rotate WebSockets when necessary
         if (lastRotation == -1) {
           lastRotation = rsp.timeMillis
         } else if (rsp.timeMillis - lastRotation > wsRotatePeriodMillis) {
           lastRotation = rsp.timeMillis
+
           if (tempWebSocket.isDefined) {
             throw new RuntimeException(s"($partNum) WebSocket rotation error")
           }
@@ -367,19 +454,26 @@ class BinanceMarketDataSource extends DataSource {
     }
 
     def connect(): WebSocketClient = {
-      val client = new WebSocketClient(new URI(
-        "wss://stream.binance.com:9443/stream?streams=" +
-          symbols.keySet.map(_ + "@" + streamName).mkString("/")
-      )) {
-        override def onOpen(handshakedata: ServerHandshake): Unit = {}
+      val url = "wss://stream.binance.com:9443/" + wsPath(symbols, streamName)
+      println("URL: ", url)
+      val client = new WebSocketClient(new URI(url)) {
+        override def onOpen(handshakedata: ServerHandshake): Unit = {
+          println("open")
+        }
 
         override def onMessage(message: String): Unit = {
-          parseJson[StreamWrap[T]](message) match {
-            case Right(wrap) =>
-              self ! wrap
-
-            case Left(a) =>
-              throw new RuntimeException(a)
+          // First try to parse as a Seq of T
+          parseJson[Seq[T]](message) match {
+            case Right(data: Seq[T]) =>
+              data.foreach(self ! _)
+            case Left(_) =>
+              // Next try a wrapped T
+              parseJson[StreamWrap[T]](message) match {
+                case Right(data: T) =>
+                  self ! data.data
+                case Left(a) =>
+                  throw new RuntimeException(a)
+              }
           }
         }
 

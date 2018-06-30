@@ -35,7 +35,8 @@ object Main {
                   config: File = DEFAULT_CONFIG_FILE,
                   name: String = "",
                   sources: Seq[String] = List.empty,
-                  topics: Seq[String] = List.empty)
+                  topics: Seq[String] = List.empty,
+                  types: Seq[String] = List.empty)
 
   private val optsParser = new OptionParser[Opts]("flashbot") {
     head("flashbot", "0.1")
@@ -62,8 +63,13 @@ object Main {
         opt[Seq[String]]('s', "sources")
           .action((x, c) => c.copy(sources = x))
           .text("Comma separated list of data sources to ingest"),
-        opt[Seq[String]]('s', "topics")
-          .action((x, c) => c.copy(topics = x)))
+        opt[Seq[String]]("topics")
+          .action((x, c) => c.copy(topics = x))
+          .text("Comma separated list of topics to ingest"),
+        opt[Seq[String]]("types")
+          .action((x, c) => c.copy(types = x))
+          .text("Comma separated list of data types to ingest")
+      )
 
     cmd("server").action((_, c) => c.copy(cmd = "server"))
       .text("Start a local trading server.")
@@ -124,7 +130,8 @@ object Main {
             srcName,
             List(opts.dataPath, "sources").mkString("/"),
             flashbotConfig.data_sources(srcName),
-            opts.topics
+            opts.topics.toSet,
+            opts.types.toSet
           )
         })
 

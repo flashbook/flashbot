@@ -40,11 +40,13 @@ object DataSource {
   case object FullBook extends BuiltInType
   case class DepthBook(depth: Int) extends BuiltInType
   case object Trades extends BuiltInType
+  case object Tickers extends BuiltInType
 
   def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
     case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
     case "trades" :: Nil => Some(Trades)
+    case "tickers" :: Nil => Some(Tickers)
     case _ => None
   }
 }

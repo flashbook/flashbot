@@ -73,8 +73,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                 }
 
                 events = events :+
-                  Received(clientOid, product, Some(clientOid), Market) :+
-                  Done(clientOid, product, side, Filled, None, None)
+                  OrderReceived(clientOid, product, Some(clientOid), Market) :+
+                  OrderDone(clientOid, product, side, Filled, None, None)
             }
 
             /**
@@ -85,7 +85,7 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                 case (product, book) if book.orders.contains(id) =>
                   val order = book.orders(id)
                   myOrders = myOrders + (product -> book.done(id))
-                  events = events :+ Done(id, product, order.side, Canceled,
+                  events = events :+ OrderDone(id, product, order.side, Canceled,
                     order.price, Some(order.amount))
                 case _ =>
               }
