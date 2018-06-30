@@ -9,9 +9,13 @@ class Binance extends Exchange {
 
   override def formatPair(pair: Pair): String = ???
 
-  override def update(session: TradingSession, data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = ???
+  override def collect(session: TradingSession,
+                       data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = {
+  }
 
-  override def order(req: OrderRequest): Unit = ???
+  override def order(req: OrderRequest): Unit = {
+    tick()
+  }
 
   override def cancel(id: String): Unit = ???
 

@@ -79,7 +79,7 @@ package object core {
 
   case class Market(exchange: String, product: Pair)
 
-  case class Tick(micros: Long, source: String, topic: String, dataType: String) extends MarketData
+  case class Tick(exchange: String)
 
   trait StrategyEvent
 }

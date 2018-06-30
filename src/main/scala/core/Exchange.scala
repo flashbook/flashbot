@@ -9,10 +9,10 @@ object Exchange {
 
 abstract class Exchange {
 
-  var tickFn: () => Unit = () => {}
+  var tick: () => Unit = () => {}
 
   def setTickFn(fn: () => Unit): Unit = {
-    tickFn = fn
+    tick = fn
   }
 
   def makerFee: Double

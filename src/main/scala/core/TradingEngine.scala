@@ -163,7 +163,7 @@ class TradingEngine(dataDir: String,
           try {
             val instance: Exchange = classOpt.get.newInstance
             instance.setTickFn(() => {
-              tickRefOpt.foreach(_ ! Tick)
+              tickRefOpt.foreach(_ ! Tick(srcKey))
             })
             exchanges = exchanges + (srcKey -> (
               if (mode == Live) instance
@@ -285,14 +285,24 @@ class TradingEngine(dataDir: String,
           case _ => _.merge(_)
         })
         .mergeMat(Source.actorRef[Tick](Int.MaxValue, OverflowStrategy.fail))(Keep.right)
+        .map[Either[MarketData, Tick]] {
+          case md: MarketData => Left(md)
+          case tick: Tick => Right(tick)
+        }
         .scan(Session()) { case (session @ Session(seqNr, balances, prices, oms,
-            actions, ids, _), data) =>
+            actions, ids, _), dataOrTick) =>
+
+          // Split up `dataOrTick` into two Options
+          val (tick: Option[Tick], data: Option[MarketData]) = dataOrTick match {
+            case Right(t: Tick) => (Some(t), None)
+            case Left(md: MarketData) => (None, Some(md))
+          }
 
           // Update the relevant exchange with the market data to collect fills and user data
           var fills: Option[scala.Seq[Fill]] = None
           var userData: Option[scala.Seq[OrderEvent]] = None
-          if (exchanges.isDefinedAt(data.source)) {
-            exchanges(data.source).collect(session, data) match {
+          if (data.exists(data => exchanges.isDefinedAt(data.source))) {
+            exchanges(data.get.source).collect(session, data.get) match {
               case (_f, _d) =>
                 fills = Some(_f)
                 userData = Some(_d)
@@ -305,10 +315,15 @@ class TradingEngine(dataDir: String,
           // Use a sequence number to enforce the rule that Session.handleEvents is only
           // allowed to be called in the current call stack. Send market data to strategy,
           // then lock the handleEvent method again.
-          currentStrategySeqNr = Some(session.seqNr)
-          strategy.handleData(data)(session)
-          currentStrategySeqNr = None
+          data match {
+            case Some(md) =>
+              currentStrategySeqNr = Some(session.seqNr)
+              strategy.handleData(md)(session)
+              currentStrategySeqNr = None
+            case None =>
+          }
 
+          // These should be empty if `handleData` wasn't called.
           val targets = session.collectTargets
           var newReportEvents = session.collectReportEvents
 
@@ -324,94 +339,90 @@ class TradingEngine(dataDir: String,
 
           // If this data has price info attached, emit that price info.
           data match {
-            case pd: Priced => // I love pattern matching on types.
+            case Some(pd: Priced) => // I love pattern matching on types.
               newPrices += (Market(pd.exchange, pd.product) -> pd.price)
               emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
             case _ =>
           }
 
+
           // Update ids and actions bookkeeping state in response to fills and user data emitted
           // from the relevant exchange.
-          exchanges.get(data.source) match {
-            case Some(exchange) =>
-              val ex = data.source
-              def acc(currency: String) = Account(ex, currency)
+          val ex = data.map(_.source).getOrElse(tick.get.exchange)
+          def acc(currency: String) = Account(ex, currency)
+          userData.get.foldLeft((newIds, newActions)) {
+            /**
+              * Either market or limit order received by the exchange. Associate the client id
+              * with the exchange id. Do not close any actions yet. Wait until the order is
+              * open, in the case of limit order, or done if it's a market order.
+              */
+            case ((is, as), OrderReceived(id, _, clientId, _)) =>
+              (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
 
-              userData.get.foldLeft((newIds, newActions)) {
+            /**
+              * Limit order is opened on the exchange. Close the action that submitted it.
+              */
+            case ((is, as), OrderOpen(id, _, _, _, _)) =>
+              (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
+
+            /**
+              * Either market or limit order is done. Could be due to a fill, or a cancel.
+              * Disassociate the ids to keep memory bounded in the ids manager. Also close
+              * the action for the order id.
+              */
+            case ((is, as), OrderDone(id, _, _, _, _, _)) =>
+              (is.updated(ex, is(ex).orderComplete(id)),
+                as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
+
+          } match { case (_newIds, _newActions) =>
+              newIds = _newIds
+              newActions = _newActions
+          }
+
+          newBalances = fills.get.foldLeft(newBalances) {
+            case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
+                createdAt, liquidity, side)) =>
+
+              val ret = side match {
                 /**
-                  * Either market or limit order received by the exchange. Associate the client id
-                  * with the exchange id. Do not close any actions yet. Wait until the order is
-                  * open, in the case of limit order, or done if it's a market order.
+                  * If we just bought some BTC using USD, then the fee was already subtracted
+                  * from the amount of available funds when determining the size of BTC filled.
+                  * Simply add the filled size to the existing BTC balance for base. For quote,
+                  * it's a little more complicated. We need to reconstruct the original amount
+                  * of quote funds (total cost) that was used for the order.
+                  *
+                  * total_cost * (1 - fee) = size * price
                   */
-                case ((is, as), OrderReceived(id, _, clientId, _)) =>
-                  (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
+                case Buy =>
+                  // Cost without accounting for fees. This is what we pay the maker.
+                  val rawCost = size * price
+
+                  // Total quote currency paid out to both maker and exchange
+                  val totalCost = rawCost / (1 - fee)
+
+                  bs + (
+                    acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
+                    acc(quote) -> (bs(acc(quote)) - totalCost)
+                  )
 
                 /**
-                  * Limit order is opened on the exchange. Close the action that submitted it.
+                  * If we just sold a certain amount of BTC for USD, then the fee is subtracted
+                  * from the USD that is to be credited to our account balance.
                   */
-                case ((is, as), OrderOpen(id, _, _, _, _)) =>
-                  (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-                /**
-                  * Either market or limit order is done. Could be due to a fill, or a cancel.
-                  * Disassociate the ids to keep memory bounded in the ids manager. Also close
-                  * the action for the order id.
-                  */
-                case ((is, as), OrderDone(id, _, _, _, _, _)) =>
-                  (is.updated(ex, is(ex).orderComplete(id)),
-                    as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-              } match { case (_newIds, _newActions) =>
-                  newIds = _newIds
-                  newActions = _newActions
+                case Sell => bs + (
+                  acc(base) -> (bs(acc(base)) - size),
+                  acc(quote) -> (bs.getOrElse(acc(quote), 0.0) + size * price * (1 - fee))
+                )
               }
 
-              newBalances = fills.get.foldLeft(newBalances) {
-                case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
-                    createdAt, liquidity, side)) =>
+              // Emit a trade event when we see a fill
+              emitReportEvent(TradeEvent(tradeId, ex, pair.toString, createdAt, price, size))
 
-                  val ret = side match {
-                    /**
-                      * If we just bought some BTC using USD, then the fee was already subtracted
-                      * from the amount of available funds when determining the size of BTC filled.
-                      * Simply add the filled size to the existing BTC balance for base. For quote,
-                      * it's a little more complicated. We need to reconstruct the original amount
-                      * of quote funds (total cost) that was used for the order.
-                      *
-                      * total_cost * (1 - fee) = size * price
-                      */
-                    case Buy =>
-                      // Cost without accounting for fees. This is what we pay the maker.
-                      val rawCost = size * price
+              // Also balance info
+              emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
+              emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), createdAt))
 
-                      // Total quote currency paid out to both maker and exchange
-                      val totalCost = rawCost / (1 - fee)
-
-                      bs + (
-                        acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
-                        acc(quote) -> (bs(acc(quote)) - totalCost)
-                      )
-
-                    /**
-                      * If we just sold a certain amount of BTC for USD, then the fee is subtracted
-                      * from the USD that is to be credited to our account balance.
-                      */
-                    case Sell => bs + (
-                      acc(base) -> (bs(acc(base)) - size),
-                      acc(quote) -> (bs.getOrElse(acc(quote), 0.0) + size * price * (1 - fee))
-                    )
-                  }
-
-                  // Emit a trade event when we see a fill
-                  emitReportEvent(TradeEvent(tradeId, ex, pair.toString, createdAt, price, size))
-
-                  // Also balance info
-                  emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
-                  emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), createdAt))
-
-                  ret
-              }
-            case _ =>
+              ret
           }
 
           // Send the order targets to the corresponding order manager.
