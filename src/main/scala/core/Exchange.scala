@@ -1,10 +1,11 @@
 package core
 
 import core.Order.{Fill, Side}
+import io.circe.Json
 import io.circe.generic.auto._
 
 object Exchange {
-  final case class ExchangeConfig(`class`: String)
+  final case class ExchangeConfig(`class`: String, params: Json)
 }
 
 abstract class Exchange {
@@ -12,6 +13,8 @@ abstract class Exchange {
 
   def makerFee: Double
   def takerFee: Double
+
+  // TODO: Does this need to exist on the abstract class level?
   def formatPair(pair: Pair): String
 
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type

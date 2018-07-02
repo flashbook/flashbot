@@ -142,7 +142,7 @@ object Main {
             List(opts.dataPath, "sources").mkString("/"),
             flashbotConfig.strategies,
             flashbotConfig.data_sources,
-            flashbotConfig.exchanges.mapValues(_.`class`))),
+            flashbotConfig.exchanges)),
           "trading-engine"
         )
         Http().bindAndHandle(api.routes(engine), "localhost", opts.port)

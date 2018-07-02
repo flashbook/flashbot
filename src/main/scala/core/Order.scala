@@ -4,8 +4,12 @@ import core.Order._
 
 object Order {
   trait Side
-  case object Buy extends Side
-  case object Sell extends Side
+  case object Buy extends Side {
+    override def toString: String = "buy"
+  }
+  case object Sell extends Side {
+    override def toString: String = "sell"
+  }
 
   object Side extends Side {
     def parseSide(str: String): Side = str match {

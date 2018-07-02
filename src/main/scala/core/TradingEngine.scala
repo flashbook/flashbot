@@ -13,6 +13,7 @@ import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action._
 import core.DataSource.DataSourceConfig
+import core.Exchange.ExchangeConfig
 import core.Order._
 import core.Utils.parseProductId
 import exchanges.Simulator
@@ -29,7 +30,7 @@ import scala.util.{Failure, Success}
 class TradingEngine(dataDir: String,
                     strategyClassNames: Map[String, String],
                     dataSourceConfigs: Map[String, DataSourceConfig],
-                    exchangeClassNames: Map[String, String])
+                    exchangeConfigs: Map[String, ExchangeConfig])
   extends PersistentActor with ActorLogging {
 
   implicit val system: ActorSystem = context.system
@@ -144,23 +145,24 @@ class TradingEngine(dataDir: String,
             return Left(EngineError(s"Data source instantiation error: $srcKey", err))
         }
 
-        if (exchangeClassNames.isDefinedAt(srcKey)) {
+        if (exchangeConfigs.isDefinedAt(srcKey)) {
+          val exClass = exchangeConfigs(srcKey).`class`
           var classOpt: Option[Class[_ <: Exchange]] = None
           try {
             classOpt = Some(getClass.getClassLoader
-              .loadClass(exchangeClassNames(srcKey))
+              .loadClass(exClass)
               .asSubclass(classOf[Exchange]))
           } catch {
             case err: ClassNotFoundException =>
-              return Left(EngineError("Exchange class not found: " +
-                exchangeClassNames(srcKey), err))
+              return Left(EngineError("Exchange class not found: " + exClass, err))
             case err: ClassCastException =>
-              return Left(EngineError(s"Class ${exchangeClassNames(srcKey)} must be a " +
+              return Left(EngineError(s"Class $exClass must be a " +
                 s"subclass of io.flashbook.core.Exchange", err))
           }
 
           try {
-            val instance: Exchange = classOpt.get.newInstance
+            val instance: Exchange = classOpt.get.getConstructor(classOf[Json])
+              .newInstance(exchangeConfigs(srcKey).params)
             instance.setTickFn(() => {
               tickRefOpt.foreach(_ ! Tick(srcKey))
             })

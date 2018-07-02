@@ -2,13 +2,16 @@
   "api_key": "",
   "exchanges": {
     "gdax": {
-      "class": "exchanges.GDAX"
+      "class": "exchanges.GDAX",
+      "params": {}
     },
     "binance": {
-      "class": "exchanges.Binance"
+      "class": "exchanges.Binance",
+      "params": {}
     },
     "bitmex": {
-      "class": "exchanges.BitMEX"
+      "class": "exchanges.BitMEX",
+      "params": {}
     }
   },
 
