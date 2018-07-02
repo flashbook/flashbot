@@ -33,8 +33,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   override def takerFee: Double = base.takerFee
   override def formatPair(pair: Pair): String = base.formatPair(pair)
 
-  override def update(session: TradingSession,
-                      data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = {
+  override def collect(session: TradingSession,
+                       data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = {
     var fills = Seq.empty[Order.Fill]
     var events = Seq.empty[OrderEvent]
 

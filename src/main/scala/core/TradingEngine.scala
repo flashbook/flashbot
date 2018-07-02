@@ -16,7 +16,6 @@ import core.DataSource.DataSourceConfig
 import core.Order._
 import core.Utils.parseProductId
 import exchanges.Simulator
-import sources.InternalDataSource
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
@@ -292,6 +291,8 @@ class TradingEngine(dataDir: String,
         .scan(Session()) { case (session @ Session(seqNr, balances, prices, oms,
             actions, ids, _), dataOrTick) =>
 
+          implicit val ctx: TradingSession = session
+
           // Split up `dataOrTick` into two Options
           val (tick: Option[Tick], data: Option[MarketData]) = dataOrTick match {
             case Right(t: Tick) => (Some(t), None)
@@ -434,31 +435,31 @@ class TradingEngine(dataDir: String,
           // If necessary, expand the next target into actions and enqueue them for each
           // order manager.
           newOMs.foreach {
-            case (ex, om) =>
+            case (exName, om) =>
               om.enqueueActions(
-                exchanges(ex),
-                newActions(ex),
-                newBalances.filter(_._1.exchange == ex)
+                exchanges(exName),
+                newActions(exName),
+                newBalances.filter(_._1.exchange == exName)
                   .map { case (acc, value) => (acc.currency, value) },
-                newPrices.filter(_._1.exchange == ex)
+                newPrices.filter(_._1.exchange == exName)
                   .map { case (market, value) => (market.product, value) }
               ) match {
                 case (_om, _actions) =>
-                  newOMs += (ex -> _om)
-                  newActions += (ex -> _actions)
+                  newOMs += (exName -> _om)
+                  newActions += (exName -> _actions)
               }
           }
 
           // Here is where we tell the exchanges to do stuff, like place or cancel orders.
-          newActions.foreach { case (ex, acs) =>
+          newActions.foreach { case (exName, acs) =>
             acs match {
               case ActionQueue(None, next +: rest) =>
-                newActions += (ex -> ActionQueue(Some(next), rest))
+                newActions += (exName -> ActionQueue(Some(next), rest))
 
                 next match {
                   case PostMarketOrder(clientId, targetId, pair, side, size, funds) =>
-                    newIds += (ex -> newIds(ex).initOrder(targetId, clientId))
-                    exchanges(ex).order(MarketOrderRequest(clientId, side, pair, size, funds))
+                    newIds += (exName -> newIds(exName).initOrder(targetId, clientId))
+                    exchanges(exName).order(MarketOrderRequest(clientId, side, pair, size, funds))
 
 //                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
 //                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
@@ -471,7 +472,7 @@ class TradingEngine(dataDir: String,
 //                      ))
 
                   case CancelLimitOrder(id, targetId, pair) =>
-                    exchanges(ex).cancel(ids(ex).actualIdForTargetId(targetId))
+                    exchanges(exName).cancel(ids(exName).actualIdForTargetId(targetId))
                 }
               case _ =>
             }

@@ -9,21 +9,10 @@ object Exchange {
 
 abstract class Exchange {
 
-  var tick: () => Unit = () => {}
-
-  def setTickFn(fn: () => Unit): Unit = {
-    tick = fn
-  }
 
   def makerFee: Double
   def takerFee: Double
   def formatPair(pair: Pair): String
-
-  /**
-    * A function that returns user data by the exchange in its current state for the given
-    * trading session.
-    */
-  def collect(session: TradingSession, data: MarketData): (Seq[Fill], Seq[OrderEvent])
 
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
@@ -33,6 +22,34 @@ abstract class Exchange {
   def quoteAssetPrecision(pair: Pair): Int
 
   def useFundsForMarketBuys: Boolean
+
+
+  var tick: () => Unit = () => {}
+  def setTickFn(fn: () => Unit): Unit = {
+    tick = fn
+  }
+
+
+
+  private var fills = Seq.empty[Fill]
+  def fill(f: Fill): Unit = fills :+= f
+
+  private var events = Seq.empty[OrderEvent]
+  def event(e: OrderEvent): Unit = events :+= e
+
+  /**
+    * A function that returns user data by the exchange in its current state for the given
+    * trading session.
+    */
+  def collect(session: TradingSession,
+                       data: MarketData): (Seq[Fill], Seq[OrderEvent]) = {
+    val ret = (fills, events)
+    fills = Seq.empty
+    events = Seq.empty
+    ret
+  }
+
+
 }
 
 sealed trait OrderRequest {

@@ -38,7 +38,7 @@ abstract class Strategy {
   /**
     * Receives events that occur in the system as a result of actions taken in this strategy.
     */
-  def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession)
+  def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {}
 
   def orderTargetRatio(exchangeName: String, product: String, target: Double)
                       (implicit ctx: TradingSession): Unit = {

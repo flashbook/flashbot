@@ -10,6 +10,7 @@ import core.{CurrencyConfig, TradingEngine, Utils}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
 import data.IngestService
+import io.circe.Json
 import io.circe.parser._
 import io.prometheus.client.exporter.HTTPServer
 
@@ -98,13 +99,13 @@ object Main {
 
     val opts = optsParser.parse(args, Opts()).get
 
-    val baseConfig = parse(Source
+    val baseConfigJson: Json = parse(Source
       .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
-      .getLines.mkString).right.get.as[ConfigFile].right.get
+      .getLines.mkString).right.get
 
-    val flashbotConfig = baseConfig
-//    val flashbotConfig = Source.fromFile(opts.config)
-//      .getLines.mkString.asJson.as[ConfigFile].right.get
+    val flashbotConfig = baseConfigJson
+      .deepMerge(Source.fromFile(opts.config).getLines.mkString.asJson)
+      .as[ConfigFile].right.get
 
     val systemConfig = ConfigFactory.load()
       .withValue("akka.persistence.journal.leveldb.dir",

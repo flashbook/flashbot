@@ -215,10 +215,10 @@ class BinanceMarketDataSource extends DataSource {
                       dataType: String,
                       timeRange: core.TimeRange): Iterator[MarketData] = {
 
-    if (topic == "tick") {
-      return new InternalDataSource().stream(dataDir, topic, dataType, timeRange)
-        .map { case tick: Tick => tick.copy(source = "binance")}
-    }
+//    if (topic == "tick") {
+//      return new InternalDataSource().stream(dataDir, topic, dataType, timeRange)
+//        .map { case tick: Tick => tick.copy(exchange = "binance")}
+//    }
 
     parseBuiltInDataType(dataType) match {
       case Some(DepthBook(BOOK_DEPTH)) =>

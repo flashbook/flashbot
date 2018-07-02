@@ -48,7 +48,8 @@ lazy val jsonDeps = List(
   "io.circe" %% "circe-core" % circeVersion,
   "io.circe" %% "circe-generic" % circeVersion,
   "io.circe" %% "circe-parser" % circeVersion,
-  "io.circe" %% "circe-optics" % circeVersion
+  "io.circe" %% "circe-optics" % circeVersion,
+  "io.circe" %% "circe-literal" % circeVersion
 )
 
 lazy val dataStores = List(

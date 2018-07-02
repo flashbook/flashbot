@@ -11,8 +11,6 @@ class BitMEX extends Exchange {
 
   override def cancel(id: String): Unit = ???
 
-  override def update(session: TradingSession, data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = ???
-
   override def order(req: OrderRequest): Unit = ???
 
   override def baseAssetPrecision(pair: Pair): Int = ???
