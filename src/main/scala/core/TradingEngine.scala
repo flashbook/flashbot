@@ -161,8 +161,9 @@ class TradingEngine(dataDir: String,
           }
 
           try {
-            val instance: Exchange = classOpt.get.getConstructor(classOf[Json])
-              .newInstance(exchangeConfigs(srcKey).params)
+            val instance: Exchange = classOpt.get.getConstructor(
+              classOf[Json], classOf[ActorSystem], classOf[ActorMaterializer])
+              .newInstance(exchangeConfigs(srcKey).params, system, mat)
             instance.setTickFn(() => {
               tickRefOpt.foreach(_ ! Tick(srcKey))
             })
@@ -384,7 +385,7 @@ class TradingEngine(dataDir: String,
 
           newBalances = fills.get.foldLeft(newBalances) {
             case (bs, Fill(_, tradeId, fee, pair @ Pair(base, quote), price, size,
-                createdAt, liquidity, side)) =>
+                micros, liquidity, side)) =>
 
               val ret = side match {
                 /**
@@ -419,11 +420,11 @@ class TradingEngine(dataDir: String,
               }
 
               // Emit a trade event when we see a fill
-              emitReportEvent(TradeEvent(tradeId, ex, pair.toString, createdAt, price, size))
+              emitReportEvent(TradeEvent(tradeId, ex, pair.toString, micros, price, size))
 
               // Also balance info
-              emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), createdAt))
-              emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), createdAt))
+              emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), micros))
+              emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), micros))
 
               ret
           }
@@ -497,7 +498,7 @@ class TradingEngine(dataDir: String,
         .run
 
       // Allows exchanges to send ticks, so that we can react instantly to exchange events.
-      tickRefOpt = Some(tickRef)
+//      tickRefOpt = Some(tickRef)
 
       fut.onComplete {
         case Success(_) =>
@@ -746,7 +747,7 @@ object TradingEngine {
   case class SessionFuture(fut: Future[akka.Done]) extends Event
 
   sealed trait ReportEvent extends Timestamped
-  case class TradeEvent(id: String,
+  case class TradeEvent(id: Option[String],
                         exchange: String,
                         product: String,
                         micros: Long,

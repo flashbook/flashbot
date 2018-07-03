@@ -26,13 +26,10 @@ abstract class Exchange {
 
   def useFundsForMarketBuys: Boolean
 
-
   var tick: () => Unit = () => {}
   def setTickFn(fn: () => Unit): Unit = {
     tick = fn
   }
-
-
 
   private var fills = Seq.empty[Fill]
   def fill(f: Fill): Unit = fills :+= f
@@ -51,8 +48,6 @@ abstract class Exchange {
     events = Seq.empty
     ret
   }
-
-
 }
 
 sealed trait OrderRequest {

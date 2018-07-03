@@ -104,7 +104,7 @@ object Main {
       .getLines.mkString).right.get
 
     val flashbotConfig = baseConfigJson
-      .deepMerge(Source.fromFile(opts.config).getLines.mkString.asJson)
+      .deepMerge(parse(Source.fromFile(opts.config, "utf-8").getLines.mkString).right.get)
       .as[ConfigFile].right.get
 
     val systemConfig = ConfigFactory.load()

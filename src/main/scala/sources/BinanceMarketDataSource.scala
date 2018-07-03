@@ -152,7 +152,7 @@ class BinanceMarketDataSource extends DataSource {
     val tickersStream = Source
       .actorRef[TickerMD](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(MAX_PRODUCTS, _.product)
-      .via(deDupeStream(_.data.lastTradeId))
+      .via(deDupeStream(_.data.micros))
       .via(initResource(md => timeLog[TickerMD](dataDir, md.product, md.dataType)))
       .recover {
         case err =>
@@ -161,7 +161,6 @@ class BinanceMarketDataSource extends DataSource {
       }
       .to(Sink.foreach {
         case (timeLog, md) =>
-//          println("saving ticker", md)
           timeLog.enqueue(md)
       }).run
 
@@ -407,7 +406,8 @@ class BinanceMarketDataSource extends DataSource {
          // Send it to the update function
         val prod = symbols.get(rsp.symbol.toLowerCase)
         if (prod.isEmpty) {
-          log.warning(s"Skipping ${rsp.symbol} ticker ingest")
+          // TODO: Uncomment this warning
+//          log.warning(s"Skipping ${rsp.symbol} ticker ingest")
         } else if (products contains prod.get) {
           updateFn(prod.get, rsp)
         }

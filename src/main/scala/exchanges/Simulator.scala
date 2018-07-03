@@ -59,14 +59,16 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                 if (depths.isDefinedAt(product)) {
                   fills = fills ++
                     aggFillOrder(depths(product), side, size, funds.map(_ * (1 - takerFee)))
-                      .map { case (price, quantity) => Fill(clientOid, clientOid, takerFee,
+                      .map { case (price, quantity) => Fill(clientOid, Some(clientOid), takerFee,
                         product, price, quantity, currentTimeMicros, Taker, side)}
 
                 } else if (prices.isDefinedAt(product)) {
                   // We may not have aggregate book data, in that case, simply use the last price.
-                  fills = fills :+ Fill(clientOid, clientOid, takerFee, product, prices(product),
+                  fills = fills :+ Fill(
+                    clientOid, Some(clientOid), takerFee, product, prices(product),
                     if (side == Buy) (funds.get * (1 - takerFee)) / prices(product) else size.get,
-                    currentTimeMicros, Taker, side)
+                    currentTimeMicros, Taker, side
+                  )
 
                 } else {
                   throw new RuntimeException("No pricing data available for simulation")
