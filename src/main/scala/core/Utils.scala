@@ -77,4 +77,6 @@ object Utils {
     case hourFmt(len: String) => FiniteDuration(len.toInt, HOURS)
     case dayFmt(len: String) => FiniteDuration(len.toInt, DAYS)
   }
+
+  def currentTimeMicros: Long = System.currentTimeMillis * 1000
 }

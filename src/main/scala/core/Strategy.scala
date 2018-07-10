@@ -3,7 +3,7 @@ package core
 import io.circe.Json
 import core.Utils.parseProductId
 import core.DataSource.DataSourceConfig
-import core.TradingEngine.GaugeEvent
+import core.TradingEngine.TimeSeriesEvent
 import core.TradingSession.{OrderTarget, SessionReportEvent}
 
 /**
@@ -51,7 +51,7 @@ abstract class Strategy {
 
   def metric(name: String, value: Double, micros: Long)
             (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(GaugeEvent(name, value, micros)))
+    ctx.handleEvents(SessionReportEvent(TimeSeriesEvent(name, value, micros)))
   }
 }
 

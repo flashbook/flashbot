@@ -17,7 +17,7 @@ import core.DataSource._
 import core.Utils._
 import core.{AggBook => _, _}
 import data.TimeLog
-import data.TimeLog.TimeLog
+import data.TimeLog.{ScanDuration, TimeLog}
 import io.circe.{Decoder, Json}
 import io.circe.generic.auto._
 import org.java_websocket.WebSocket
@@ -283,7 +283,10 @@ class BinanceMarketDataSource extends DataSource {
 
       case Some(Tickers) =>
         val tickersLog: TimeLog[TickerMD] = timeLog(dataDir, parseProductId(topic), dataType)
-        tickersLog.scan(timeRange.from, _.micros, _.micros < timeRange.to)()
+        tickersLog.scan(
+          timeRange.from,
+          _.micros,
+          _.micros < timeRange.to)()
 
       case Some(_) =>
         throw new RuntimeException(s"Unsupported data type: $dataType")

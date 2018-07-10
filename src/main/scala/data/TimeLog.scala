@@ -145,7 +145,7 @@ object TimeLog {
     def scan[U](from: U,
                 comparing: T => U,
                 shouldContinue: T => Boolean,
-                duration: ScanDuration = ScanDuration.Finite)
+                duration: ScanDuration = ScanDuration.Continuous)
                (onComplete: () => Unit = () => {})
                (implicit de: Decoder[T],
                 ordering: Ordering[U]): Iterator[T] =

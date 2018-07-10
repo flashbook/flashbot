@@ -6,9 +6,11 @@ import akka.actor.{ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.stream.Materializer
 import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
-import core.{CurrencyConfig, TradingEngine, Utils}
+import core.{BotConfig, CurrencyConfig, TradingEngine, Utils}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
+import core.TradingEngine.StartTradingSession
+import core.TradingSession.Live
 import data.IngestService
 import io.circe.Json
 import io.circe.parser._
@@ -23,7 +25,8 @@ object Main {
                         strategies: Map[String, String] = Map.empty,
                         exchanges: Map[String, ExchangeConfig] = Map.empty,
                         data_sources: Map[String, DataSourceConfig] = Map.empty,
-                        currencies: Map[String, CurrencyConfig] = Map.empty)
+                        currencies: Map[String, CurrencyConfig] = Map.empty,
+                        bots: Map[String, BotConfig] = Map.empty)
 
 
   val DEFAULT_CONFIG_FILE = new File(".")
@@ -137,14 +140,18 @@ object Main {
         })
 
       case "server" =>
+        // Start the trading engine
         val engine = system.actorOf(
           Props(new TradingEngine(
             List(opts.dataPath, "sources").mkString("/"),
             flashbotConfig.strategies,
             flashbotConfig.data_sources,
-            flashbotConfig.exchanges)),
+            flashbotConfig.exchanges,
+            flashbotConfig.bots)),
           "trading-engine"
         )
+
+        // Start the HTTP server
         Http().bindAndHandle(api.routes(engine), "localhost", opts.port)
     }
 

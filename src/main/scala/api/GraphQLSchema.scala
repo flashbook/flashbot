@@ -43,7 +43,6 @@ object GraphQLSchema {
         Field("strategy", StringType, resolve = c => c.value.strategy),
         Field("params", StringType, resolve = c => c.value.params),
         Field("time_range", TimeRangeType, resolve = c => c.value.timeRange),
-        Field("done", BooleanType, resolve = c => c.value.done),
         Field("trades", ListType(TradeType), resolve = c => c.value.trades),
 
         Field("time_series", ListType(TimeSeriesType),
@@ -77,9 +76,7 @@ object GraphQLSchema {
     val ToArg = Argument("to", LongType)
 
     val BalancesArg = Argument("balances", StringType)
-
-    val MakerFeeArg = Argument("maker_fee", OptionInputType(FloatType))
-    val TakerFeeArg = Argument("taker_fee", OptionInputType(FloatType))
+    val BarSizeArg = Argument("bar_size", OptionInputType(StringType))
 
     val QueryType = ObjectType("Query", fields[UserCtx, Unit](
       /**
@@ -93,16 +90,15 @@ object GraphQLSchema {
         * by the server after the backtest completes.
         */
       Field("backtest", ReportType,
-        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg :: BalancesArg ::
-          MakerFeeArg :: TakerFeeArg :: Nil,
-        resolve = c => c.ctx.request[Report](BacktestQuery(
+        arguments = StrategyNameArg :: StrategyParamsArg :: FromArg :: ToArg ::
+          BalancesArg :: BarSizeArg :: Nil,
+        resolve = c => c.ctx.request[ReportResponse](BacktestQuery(
           c.arg(StrategyNameArg),
           c.arg(StrategyParamsArg),
           TimeRange(c.arg(FromArg), c.arg(ToArg)),
           c.arg(BalancesArg),
-          c.arg(MakerFeeArg),
-          c.arg(TakerFeeArg)
-        )))
+          c.arg(BarSizeArg).map(Utils.parseDuration)
+        )).report)
     ))
 
 //    val MutationType = ObjectType("Mutation", fields[UserCtx, Unit](

@@ -1,13 +1,9 @@
 import core.MarketData.GenMD
 import core.Utils.parseProductId
-
+import io.circe.Json
 import io.circe.generic.auto._
 
 package object core {
-
-  // TODO: Can we use refinement types to enforce the bounds?
-//  type Ratio = Double // Between -1 and 1 inclusive
-//  type Percent = Double // Between 0 and 1 inclusive
 
   case class TimeRange(from: Long = 0, to: Long = Long.MaxValue)
 
@@ -54,6 +50,11 @@ package object core {
 
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])
+
+
+  case class BotConfig(strategy: String,
+                       params: Json,
+                       balances: Map[String, Double])
 
   trait Timestamped {
     def micros: Long
