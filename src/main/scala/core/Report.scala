@@ -17,7 +17,8 @@ case class Report(strategy: String,
     case CollectionAdd(CollectionEvent(name, item)) => copy(collections = collections +
       (name -> (collections.getOrElse(name, Vector.empty[Json]) :+ item)))
     case event: CandleEvent => event match {
-      case CandleSave(_, _) => this
+      case CandleSave(series, candle) =>
+        update(CandleAdd(series, candle))
       case CandleAdd(series, candle) =>
         copy(timeSeries = timeSeries + (series ->
           (timeSeries.getOrElse(series, Vector.empty) :+ candle)))
@@ -27,7 +28,7 @@ case class Report(strategy: String,
     }
   }
 
-  def genDeltas(event: ReportEvent): Seq[ReportDelta] = event match {
+  def genDeltas(event: ReportEvent, useSaves: Boolean): Seq[ReportDelta] = (event match {
     case tradeEvent: TradeEvent => TradeAdd(tradeEvent) :: Nil
     case collectionEvent: CollectionEvent => CollectionAdd(collectionEvent) :: Nil
     case e: PriceEvent => genTimeSeriesDelta[PriceEvent](
@@ -35,6 +36,12 @@ case class Report(strategy: String,
     case e: BalanceEvent => genTimeSeriesDelta[BalanceEvent](
       List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance)
     case e: TimeSeriesEvent => genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value)
+  }).filter {
+    case e: CandleEvent => e match {
+      case CandleSave(series, candle) => useSaves
+      case _ => !useSaves
+    }
+    case _ => true
   }
 
   /**

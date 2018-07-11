@@ -12,7 +12,7 @@ import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
-import core.Report.{ReportDelta, ReportEvent}
+import core.Report._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
@@ -133,10 +133,20 @@ class TradingEngine(dataDir: String,
 
     /**
       * A bot session emitted a ReportEvent. Here is where we decide what to do about it by
-      * emitting the ReportDeltas that we'd like to persist in state.
+      * emitting the ReportDeltas that we'd like to persist in state. Specifically, if there
+      * is a balance event, we want to save that to state. In addition to that, we always
+      * generate report deltas and save those, except for candle update and creates. Only saves.
       */
     case ProcessBotSessionEvent(botId, event) =>
-      ???
+      val deltas = state.bots(botId).last.report.genDeltas(event, useSaves = true)
+        .map(ReportUpdated(botId, _))
+        .toList
+
+      Right(event match {
+        case BalanceEvent(account, balance, micros) =>
+          BalancesUpdated(botId, account, balance) :: deltas
+        case _ => deltas
+      })
   }
 
   /**
@@ -190,7 +200,8 @@ class TradingEngine(dataDir: String,
           val (ref: ActorRef, fut: Future[Report]) =
             Source.actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
               .toMat(Sink.fold[Report, ReportEvent](report) {
-                (report, event) => report.genDeltas(event).foldLeft(report)(_.update(_))
+                (report, event) =>
+                  report.genDeltas(event, useSaves = false).foldLeft(report)(_.update(_))
               })(Keep.both)
               .run
 
@@ -263,10 +274,10 @@ object TradingEngine {
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
             bot.last.updateReport(delta))))
 
-        case BalancesUpdated(botId, balances: Map[Account, Double]) =>
+        case BalancesUpdated(botId, account, balance) =>
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
-            bot.last.copy(balances = balances))))
+            bot.last.copy(balances = bot.last.balances.updated(account, balance)))))
       }
     }
   }
@@ -297,9 +308,11 @@ object TradingEngine {
   sealed trait SessionUpdated extends Event {
     def botId: String
   }
-  case class ReportUpdated(botId: String, delta: ReportDelta) extends SessionUpdated
-  case class BalancesUpdated(botId: String, balances: Map[Account, Double]) extends SessionUpdated
-
+  case class ReportUpdated(botId: String,
+                           delta: ReportDelta) extends SessionUpdated
+  case class BalancesUpdated(botId: String,
+                             account: Account,
+                             balance: Double) extends SessionUpdated
 
 
 
