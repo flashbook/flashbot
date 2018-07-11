@@ -10,7 +10,7 @@ import core.Action.{ActionQueue, CancelLimitOrder, PostMarketOrder}
 import core.DataSource.{Address, DataSourceConfig}
 import core.Exchange.ExchangeConfig
 import core.Order.{Buy, Fill, Sell}
-import core.Report.{ReportDelta, ReportEvent}
+import core.Report._
 import core.TradingEngine._
 import core.Utils.parseProductId
 import exchanges.Simulator
