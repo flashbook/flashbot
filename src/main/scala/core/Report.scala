@@ -3,10 +3,10 @@ package core
 import core.Report._
 import io.circe.Json
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
 
 case class Report(strategy: String,
-                  params: String,
+                  params: Json,
                   barSize: Duration,
                   trades: Vector[TradeEvent],
                   collections: Map[String, Vector[Json]],
@@ -104,4 +104,16 @@ object Report {
   case class TimeSeriesEvent(key: String, value: Double, micros: Long)
     extends ReportEvent with Timestamped
   case class CollectionEvent(name: String, item: Json) extends ReportEvent
+
+
+  def empty(strategyName: String,
+            params: Json,
+            barSize: Option[Duration] = None): Report = Report(
+    strategyName,
+    params,
+    barSize.getOrElse(1 minute),
+    Vector(),
+    Map.empty,
+    Map.empty
+  )
 }

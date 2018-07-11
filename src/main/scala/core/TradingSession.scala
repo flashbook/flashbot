@@ -10,7 +10,7 @@ import core.Action.{ActionQueue, CancelLimitOrder, PostMarketOrder}
 import core.DataSource.{Address, DataSourceConfig}
 import core.Exchange.ExchangeConfig
 import core.Order.{Buy, Fill, Sell}
-import core.Report.ReportEvent
+import core.Report.{ReportDelta, ReportEvent}
 import core.TradingEngine._
 import core.Utils.parseProductId
 import exchanges.Simulator
@@ -40,8 +40,11 @@ object TradingSession {
                                  strategy: String,
                                  strategyParams: Json,
                                  mode: Mode,
-                                 micros: Long,
-                                 balances: Map[Account, Double]) extends Timestamped
+                                 startedAt: Long,
+                                 balances: Map[Account, Double],
+                                 report: Report) {
+    def updateReport(delta: ReportDelta): TradingSessionState = copy(report = report.update(delta))
+  }
 
   case class SessionSetup(markets: Map[String, Set[Pair]],
                           dataSourceAddresses: Seq[Address],
@@ -53,7 +56,6 @@ object TradingSession {
                      strategyClassNames: Map[String, String],
                      dataSourceConfigs: Map[String, DataSourceConfig],
                      exchangeConfigs: Map[String, ExchangeConfig],
-                     defaultBots: Map[String, BotConfig],
                      strategyKey: String,
                      strategyParams: Json,
                      mode: Mode,

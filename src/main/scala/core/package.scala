@@ -54,7 +54,7 @@ package object core {
 
   case class BotConfig(strategy: String,
                        params: Json,
-                       balances: Map[String, Double])
+                       initial_balances: Map[String, Double])
 
   trait Timestamped {
     def micros: Long

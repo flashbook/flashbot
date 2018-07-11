@@ -6,22 +6,14 @@ import akka.pattern.pipe
 import akka.pattern.ask
 import io.circe.{Encoder, Json}
 import io.circe.parser.parse
-import io.circe.syntax._
-import java.util.UUID
-
 import TradingSession._
-import akka.NotUsed
+import akka.Done
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
-import core.Action._
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
-import core.Order._
-import core.Report.ReportEvent
-import core.Utils.parseProductId
-import exchanges.Simulator
+import core.Report.{ReportDelta, ReportEvent}
 
-import scala.collection.immutable.Queue
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.util.{Failure, Success}
@@ -45,7 +37,7 @@ class TradingEngine(dataDir: String,
   import scala.collection.immutable.Seq
 
   val snapshotInterval = 1000
-  var state = EngineState()
+  var state = EngineState(Map.empty)
 
   override def persistenceId: String = "trading-engine"
 
@@ -60,23 +52,41 @@ class TradingEngine(dataDir: String,
     case StartEngine =>
       // Start the default bots
       defaultBots.foreach {
-        case (name, BotConfig(strategy, params, balances)) =>
+        case (name, BotConfig(strategy, params, initial_balances)) =>
 
-          val (ref, fut) = Source
-            .actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
-            .toMat(Sink.fold())(Keep.both)
-            .run
-
-          self ! StartTradingSession(
-            strategy,
-            params,
-            Live,
-            context.actorOf(Props[BotSessionReporter], "bot-reporter"),
-            balances.map {
+          // First of all, we look for any previous sessions for this bot. If one exists, then
+          // take the balance from the last session as the initial balances for this session.
+          // Otherwise, use the initial_balances from the bot config.
+          val initialSessionBalances =
+            state.bots.get(name).map(_.last.balances).getOrElse(initial_balances.map {
               case (key, v) =>
                 val parts = key.split("/")
                 (Account(parts(0), parts(1)), v)
-            }
+            })
+
+          // Create an actor that processes ReportEvents from this session.
+          val (ref, fut) = Source
+            .actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
+            .toMat(Sink.foreach { event =>
+              self ! ProcessBotSessionEvent(name, event)
+            })(Keep.both)
+            .run
+
+          fut onComplete {
+            case Success(Done) =>
+              log.info(s"Bot $name completed successfully")
+            case Failure(err) =>
+              log.error(err, s"Bot $name failed")
+          }
+
+          self ! StartTradingSession(
+            Some(name),
+            strategy,
+            params,
+            Live,
+            ref,
+            initialSessionBalances,
+            Report.empty(strategy, params)
           )
       }
       Right(EngineStarted(Utils.currentTimeMicros) :: Nil)
@@ -86,11 +96,13 @@ class TradingEngine(dataDir: String,
       * by either a backtest query or a running bot.
       */
     case StartTradingSession(
+        botIdOpt,
         strategyKey,
         strategyParams,
         mode,
         sessionEventsRef,
-        initialBalances
+        initialBalances,
+        report
     ) =>
 
       val sessionActor = context.actorOf(Props(new SessionActor(
@@ -98,7 +110,6 @@ class TradingEngine(dataDir: String,
         strategyClassNames,
         dataSourceConfigs,
         exchangeConfigs,
-        defaultBots,
         strategyKey,
         strategyParams,
         mode,
@@ -111,13 +122,21 @@ class TradingEngine(dataDir: String,
       try {
         Await.result(sessionActor ? "start", 1 second) match {
           case (sessionId: String, micros: Long) =>
-            Right(SessionStarted(sessionId, strategyKey, strategyParams, mode, micros) :: Nil)
+            Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
+              mode, micros, initialBalances, report) :: Nil)
           case err: EngineError => Left(err)
         }
       } catch {
         case err: TimeoutException =>
           Left(EngineError("Trading session initialization timeout", err))
       }
+
+    /**
+      * A bot session emitted a ReportEvent. Here is where we decide what to do about it by
+      * emitting the ReportDeltas that we'd like to persist in state.
+      */
+    case ProcessBotSessionEvent(botId, event) =>
+      ???
   }
 
   /**
@@ -157,33 +176,27 @@ class TradingEngine(dataDir: String,
         try {
           // TODO: Handle parse errors
           val paramsJson = parse(params).right.get
-          val emptyReport = Report(
-            strategyName,
-            params,
-            barSize.getOrElse(1 minute),
-            Vector(),
-            Map.empty,
-            Map.empty
-          )
+          val report = Report.empty(strategyName, paramsJson, barSize)
 
-          val balances = parse(balancesStr).right.get
+          // Parse initial balances JSON into an Account -> Double map
+          val balances: Map[Account, Double] = parse(balancesStr).right.get
             .as[Map[String, Double]].right.get
             .map { case (key, v) =>
               val parts = key.split("/")
               (Account(parts(0), parts(1)), v)
             }
 
+          // Fold the empty report over the ReportEvents emitted from the session.
           val (ref: ActorRef, fut: Future[Report]) =
             Source.actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
-              .scan((emptyReport, Seq.empty)) {
-                case ((report, deltas), event) => (report)
-              }
-              .drop(1)
-              .toMat()
+              .toMat(Sink.fold[Report, ReportEvent](report) {
+                (report, event) => report.genDeltas(event).foldLeft(report)(_.update(_))
+              })(Keep.both)
               .run
 
-          processCommand(StartTradingSession(strategyName, paramsJson,
-            Backtest(timeRange), ref, balances)) match {
+          // Start the trading session
+          processCommand(StartTradingSession(None, strategyName, paramsJson,
+            Backtest(timeRange), ref, balances, report)) match {
             case Left(err: EngineError) =>
               throw err
             case Right(events: Seq[Event]) =>
@@ -205,7 +218,7 @@ class TradingEngine(dataDir: String,
         case Left(err) =>
           sender ! err
         case Right(events) =>
-          persistAll(events.collect { case pe: PersistedEvent => pe }) { e =>
+          persistAll(events) { e =>
             state = state.update(e)
             if (lastSequenceNr % snapshotInterval == 0) {
               saveSnapshot(state)
@@ -228,7 +241,7 @@ class TradingEngine(dataDir: String,
 
 object TradingEngine {
 
-  case class EngineState(bots: Map[String, Seq[TradingSessionRecord]],
+  case class EngineState(bots: Map[String, Seq[TradingSessionState]],
                          startedAtMicros: Long = 0) {
     /**
       * A pure function that updates the state in response to an event that occurred in the
@@ -238,30 +251,54 @@ object TradingEngine {
       case EngineStarted(micros) =>
         copy(startedAtMicros = micros)
 
-      case SessionStarted(id, strategyKey, strategyParams, mode, micros) =>
-        copy(sessions = sessions + (id ->
-          TradingSessionRecord(id, strategyKey, strategyParams, mode, micros)))
+      case SessionStarted(id, Some(botId), strategyKey, strategyParams, mode,
+          micros, balances, report) =>
+        copy(bots = bots + (botId -> (
+          bots.getOrElse[Seq[TradingSessionState]](botId, Seq.empty) :+
+            TradingSessionState(id, strategyKey, strategyParams, mode, micros, balances, report))))
+
+      case e: SessionUpdated => e match {
+        case ReportUpdated(botId, delta) =>
+          val bot = bots(botId)
+          copy(bots = bots + (botId -> bot.updated(bot.length - 1,
+            bot.last.updateReport(delta))))
+
+        case BalancesUpdated(botId, balances: Map[Account, Double]) =>
+          val bot = bots(botId)
+          copy(bots = bots + (botId -> bot.updated(bot.length - 1,
+            bot.last.copy(balances = balances))))
+      }
     }
   }
 
   sealed trait Command
-  case class StartTradingSession(strategyKey: String,
+  case class StartTradingSession(botId: Option[String],
+                                 strategyKey: String,
                                  strategyParams: Json,
                                  mode: Mode,
                                  sessionEvents: ActorRef,
-                                 initialBalances: Map[Account, Double]) extends Command
+                                 initialBalances: Map[Account, Double],
+                                 report: Report) extends Command
 
   case object StartEngine extends Command
+  case class ProcessBotSessionEvent(botId: String, event: ReportEvent) extends Command
 
   sealed trait Event
-  sealed trait PersistedEvent extends Event
   case class SessionStarted(id: String,
+                            botId: Option[String],
                             strategyKey: String,
                             strategyParams: Json,
                             mode: Mode,
-                            micros: Long) extends PersistedEvent
-  case class EngineStarted(micros: Long) extends PersistedEvent
+                            micros: Long,
+                            balances: Map[Account, Double],
+                            report: Report) extends Event
+  case class EngineStarted(micros: Long) extends Event
 
+  sealed trait SessionUpdated extends Event {
+    def botId: String
+  }
+  case class ReportUpdated(botId: String, delta: ReportDelta) extends SessionUpdated
+  case class BalancesUpdated(botId: String, balances: Map[Account, Double]) extends SessionUpdated
 
 
 
