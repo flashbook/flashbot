@@ -29,17 +29,31 @@ case class Report(strategy: String,
   }
 
   def genDeltas(event: ReportEvent, useSaves: Boolean): Seq[ReportDelta] = (event match {
-    case tradeEvent: TradeEvent => TradeAdd(tradeEvent) :: Nil
-    case collectionEvent: CollectionEvent => CollectionAdd(collectionEvent) :: Nil
-    case e: PriceEvent => genTimeSeriesDelta[PriceEvent](
-      List("price", e.exchange, e.product.toString).mkString("."), e, _.price)
-    case e: BalanceEvent => genTimeSeriesDelta[BalanceEvent](
-      List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance)
-    case e: TimeSeriesEvent => genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value)
+    case tradeEvent: TradeEvent =>
+      TradeAdd(tradeEvent) :: Nil
+
+    case collectionEvent: CollectionEvent =>
+      CollectionAdd(collectionEvent) :: Nil
+
+    case e: PriceEvent =>
+      genTimeSeriesDelta[PriceEvent](
+        List("price", e.exchange, e.product.toString).mkString("."), e, _.price)
+
+    case e: BalanceEvent =>
+      genTimeSeriesDelta[BalanceEvent](
+        List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance)
+
+    case e: TimeSeriesEvent =>
+      genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value)
+
   }).filter {
     case e: CandleEvent => e match {
-      case CandleSave(series, candle) => useSaves
-      case _ => !useSaves
+      case CandleSave(series, candle) =>
+        println("filter a?", e, useSaves)
+        useSaves
+      case _ =>
+        println("filter b?", e, !useSaves)
+        !useSaves
     }
     case _ => true
   }

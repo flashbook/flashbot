@@ -88,7 +88,8 @@ class TradingEngine(dataDir: String,
             Mode(mode),
             ref,
             initialSessionBalances,
-            Report.empty(strategy, params)
+            // TODO: Remove 1 second, make default, which is 1 minute
+            Report.empty(strategy, params, Some(1 second))
           )
       }
       Right(EngineStarted(Utils.currentTimeMicros) :: Nil)
@@ -146,6 +147,8 @@ class TradingEngine(dataDir: String,
         .map(ReportUpdated(botId, _))
         .toList
 
+      println("processing bot session event", event, deltas)
+
       Right(event match {
         case BalanceEvent(account, balance, micros) =>
           BalancesUpdated(botId, account, balance) :: deltas
@@ -179,7 +182,16 @@ class TradingEngine(dataDir: String,
       log.error(cause, "Failed to delete events: {}", toSeqNr)
 
     case query: Query => query match {
-      case Ping => sender ! Pong
+      case Ping =>
+        sender ! Pong
+
+      case BotQuery(id) =>
+        sender ! BotResponse(id, state.bots(id).map(_.report))
+
+      case BotsQuery() =>
+        sender ! BotsResponse(bots = state.bots.map { case (id, bot) =>
+          BotResponse(id, bot.map(_.report))
+        }.toSeq)
 
       /**
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
@@ -335,6 +347,7 @@ object TradingEngine {
                            barSize: Option[Duration]) extends Query
 
   case class BotQuery(botId: String) extends Query
+  case class BotsQuery() extends Query
 
   sealed trait Response
   case object Pong extends Response {
@@ -342,6 +355,7 @@ object TradingEngine {
   }
   case class ReportResponse(report: Report) extends Response
   case class BotResponse(id: String, reports: Seq[Report]) extends Response
+  case class BotsResponse(bots: Seq[BotResponse]) extends Response
 
   final case class EngineError(message: String, cause: Throwable = None.orNull)
     extends Exception(message, cause) with Response

@@ -116,7 +116,13 @@ object GraphQLSchema {
         */
       Field("bot", BotType,
         arguments = BotIdArg :: Nil,
-        resolve = c => c.ctx.request[BotResponse](BotQuery(c.arg(BotIdArg))))
+        resolve = c => c.ctx.request[BotResponse](BotQuery(c.arg(BotIdArg)))),
+
+      /**
+        * Query for all bots, without their reports.
+        */
+      Field("bots", ListType(BotType),
+        resolve = c => c.ctx.request[BotsResponse](BotsQuery()).bots)
     ))
 
 //    val MutationType = ObjectType("Mutation", fields[UserCtx, Unit](

@@ -3,7 +3,6 @@ package api
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
-import core.TradingEngine
 
 import scala.concurrent.duration._
 import core.TradingEngine.{Command, Ping, Pong, Query, Response}

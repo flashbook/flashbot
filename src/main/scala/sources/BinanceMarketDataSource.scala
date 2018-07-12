@@ -449,7 +449,6 @@ class BinanceMarketDataSource extends DataSource {
 
       case "tick" =>
         mainWebSocket.sendPing()
-        println(s"($partNum) ping")
         Future {
           Thread.sleep(5000)
           self ! "tick"
@@ -471,7 +470,6 @@ class BinanceMarketDataSource extends DataSource {
               data.foreach(self ! _)
             case Left(_) =>
               // Next try a wrapped T
-              println(message)
               parseJson[StreamWrap[T]](message) match {
                 case Right(StreamWrap(_, data)) =>
                   self ! data
@@ -489,7 +487,6 @@ class BinanceMarketDataSource extends DataSource {
 
         override def onWebsocketPong(conn: WebSocket, f: Framedata): Unit = {
           super.onWebsocketPong(conn, f)
-          println(s"($partNum) pong")
         }
       }
       client.connectBlocking()
