@@ -1,7 +1,9 @@
 package api
 
+import core.Report.{Candle, TradeEvent}
 import core._
 import core.TradingEngine._
+import core.Utils.printJson
 import io.circe.{Json, JsonNumber}
 import io.circe.parser._
 import io.circe.syntax._
@@ -34,20 +36,25 @@ object GraphQLSchema {
 //    case class PriceSeries(name: String, data: Vector[Double])
 //    val PriceSeriesType = deriveObjectType[UserCtx, BalanceSeries]()
 
-    case class TimeSeries(name: String, data: Vector[Option[Double]])
+    implicit val CandleType: ObjectType[UserCtx, Candle] =
+      deriveObjectType[UserCtx, Candle]()
+
+    case class TimeSeries(name: String, data: Vector[Candle])
     val TimeSeriesType = deriveObjectType[UserCtx, TimeSeries]()
 
-    val ReportType = ObjectType("Report",
+
+    implicit val ReportType: ObjectType[UserCtx, Report] = ObjectType(
+      "Report",
       "A trading session report",
       fields[UserCtx, Report](
         Field("strategy", StringType, resolve = c => c.value.strategy),
-        Field("params", StringType, resolve = c => c.value.params),
-        Field("time_range", TimeRangeType, resolve = c => c.value.timeRange),
+        Field("params", StringType, resolve = c => printJson(c.value.params)),
+//        Field("time_range", TimeRangeType, resolve = c => c.value.timeRange),
         Field("trades", ListType(TradeType), resolve = c => c.value.trades),
 
         Field("time_series", ListType(TimeSeriesType),
           resolve = c => c.value.timeSeries.map {
-            case (k, v) => TimeSeries(k, v.values.map(Some(_)))
+            case (k, v) => TimeSeries(k, v)
           }.toSeq)
 
 //        Field("balances", ListType(BalanceSeriesType), resolve = c =>
@@ -63,6 +70,8 @@ object GraphQLSchema {
 //        )
       ))
 
+    val BotType = deriveObjectType[UserCtx, BotResponse]()
+
     val StrategyNameArg = Argument("strategy", StringType,
       description = "The strategy name")
 
@@ -77,6 +86,8 @@ object GraphQLSchema {
 
     val BalancesArg = Argument("balances", StringType)
     val BarSizeArg = Argument("bar_size", OptionInputType(StringType))
+
+    val BotIdArg = Argument("id", StringType)
 
     val QueryType = ObjectType("Query", fields[UserCtx, Unit](
       /**
@@ -98,7 +109,14 @@ object GraphQLSchema {
           TimeRange(c.arg(FromArg), c.arg(ToArg)),
           c.arg(BalancesArg),
           c.arg(BarSizeArg).map(Utils.parseDuration)
-        )).report)
+        )).report),
+
+      /**
+        * Query the state of a bot. Returns all reports.
+        */
+      Field("bot", BotType,
+        arguments = BotIdArg :: Nil,
+        resolve = c => c.ctx.request[BotResponse](BotQuery(c.arg(BotIdArg))))
     ))
 
 //    val MutationType = ObjectType("Mutation", fields[UserCtx, Unit](

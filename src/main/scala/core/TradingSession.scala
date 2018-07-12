@@ -1,10 +1,11 @@
 package core
 
 import java.util.UUID
+import java.util.concurrent.Executors
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill}
-import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.{ActorAttributes, ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import core.Action.{ActionQueue, CancelLimitOrder, PostMarketOrder}
 import core.DataSource.{Address, DataSourceConfig}
@@ -17,6 +18,7 @@ import exchanges.Simulator
 import io.circe.Json
 
 import scala.collection.immutable.Queue
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object TradingSession {
@@ -36,6 +38,13 @@ object TradingSession {
   case object Paper extends Mode
   case object Live extends Mode
 
+  object Mode {
+    def apply(str: String): Mode = str match {
+      case "live" => Live
+      case "paper" => Paper
+    }
+  }
+
   case class TradingSessionState(id: String,
                                  strategy: String,
                                  strategyParams: Json,
@@ -50,7 +59,9 @@ object TradingSession {
                           dataSourceAddresses: Seq[Address],
                           dataSources: Map[String, DataSource],
                           exchanges: Map[String, Exchange],
-                          strategy: Strategy)
+                          strategy: Strategy,
+                          sessionId: String,
+                          sessionMicros: Long)
 
   class SessionActor(dataDir: String,
                      strategyClassNames: Map[String, String],
@@ -62,6 +73,7 @@ object TradingSession {
                      sessionEventsRef: ActorRef,
                      initialBalances: Map[Account, Double]) extends Actor with ActorLogging {
 
+    implicit val ec: ExecutionContext = context.dispatcher
     implicit val system: ActorSystem = context.system
     implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
@@ -197,12 +209,13 @@ object TradingSession {
         .groupBy(_.srcKey)
         .mapValues(_.map(_.topic).map(parseProductId).toSet)
 
-      Right(SessionSetup(markets, dataSourceAddresses, dataSources, exchanges, strategyOpt.get))
+      Right(SessionSetup(markets, dataSourceAddresses, dataSources,
+        exchanges, strategyOpt.get, UUID.randomUUID.toString, Utils.currentTimeMicros))
     }
 
     def runSession(sessionSetup: SessionSetup): String = sessionSetup match {
-      case SessionSetup(markets, dataSourceAddresses, dataSources, exchanges, strategy) =>
-        val sessionId = UUID.randomUUID.toString
+      case SessionSetup(markets, dataSourceAddresses, dataSources, exchanges,
+          strategy, sessionId, sessionMicros) =>
         var currentStrategySeqNr: Option[Long] = None
 
         /**
@@ -270,6 +283,10 @@ object TradingSession {
           }
         }
 
+        val iteratorExecutor: ExecutionContext =
+          ExecutionContext.fromExecutor(
+            Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
+
         // Merge market data streams from the data sources we just loaded and stream the data into
         // the strategy instance. If this trading session is a backtest then we merge the data
         // streams by time. But if this is a live trading session then data is sent first come,
@@ -279,11 +296,19 @@ object TradingSession {
           .flatMap { case (key, addresses) =>
             addresses.map {
               case Address(_, topic, dataType) =>
-                Source.fromIterator[MarketData](() =>
-                  dataSources(key).stream(dataDir, topic, dataType, mode match {
-                    case Backtest(range) => range
-                    case _ => TimeRange()
-                  }))
+
+                val it = dataSources(key).stream(dataDir, topic, dataType, mode match {
+                  case Backtest(range) => range
+                  case _ => TimeRange(sessionMicros)
+                })
+
+                Source.unfoldAsync[Iterator[MarketData], MarketData](it) { memo =>
+                  Future {
+                    if (memo.hasNext) {
+                      Some(memo, memo.next)
+                    } else None
+                  } (iteratorExecutor)
+                }
             }
           }
           .reduce[Source[MarketData, NotUsed]](mode match {
@@ -520,15 +545,14 @@ object TradingSession {
         sessionId
     }
 
-
     override def receive: Receive = {
       case "start" =>
         setup() match {
           case Left(err) =>
             sender ! err
-
           case Right(sessionSetup) =>
-
+            sender ! (sessionSetup.sessionId, sessionSetup.sessionMicros)
+            runSession(sessionSetup)
         }
     }
   }

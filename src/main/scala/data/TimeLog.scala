@@ -92,22 +92,6 @@ object TimeLog {
       inFlightMessage = None
     }
 
-    // A scan that accumulates a value as it iterates.
-//    def reduceWhile[A](from: Long,
-//                       zero: A,
-//                       duration: ScanDuration = ScanDuration.Finite,
-//                       handler: (A, T) => (A, Boolean))
-//                      (implicit de: Decoder[T]): A = {
-//
-//      var result: A = zero
-//      scan(from, duration) { msg =>
-//        val (newResult, shouldContinue) = handler(result, msg)
-//        result = newResult
-//        shouldContinue
-//      }
-//      result
-//    }
-
     class TimeLogIterator(tailer: ExcerptTailer,
                           shouldContinue: T => Boolean,
                           reader: NextMsgReader)
@@ -117,18 +101,27 @@ object TimeLog {
       private var _next: Option[T] = None
 
       override def hasNext: Boolean = {
-        _next = reader
+        if (_next.isDefined) {
+          return true
+        }
+
+        val tmpNext = reader
           .read(tailer, pauser)
           .map(decode[T])
           .map(_.right.get)
-        val _hasNext = _next.isDefined && shouldContinue(_next.get)
-        if (!_hasNext) {
+        if (tmpNext.isDefined && shouldContinue(tmpNext.get)) {
+          _next = tmpNext
+        } else {
           onComplete()
         }
-        _hasNext
+        _next.isDefined
       }
 
-      override def next: T = _next.get
+      override def next: T = {
+        val ret = _next.get
+        _next = None
+        ret
+      }
     }
 
     def scanBackwards(shouldContinue: T => Boolean)

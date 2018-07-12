@@ -9,7 +9,7 @@ import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import core.{BotConfig, CurrencyConfig, TradingEngine, Utils}
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
-import core.TradingEngine.StartTradingSession
+import core.TradingEngine.{StartEngine, StartTradingSession}
 import core.TradingSession.Live
 import data.IngestService
 import io.circe.Json
@@ -28,7 +28,6 @@ object Main {
                         currencies: Map[String, CurrencyConfig] = Map.empty,
                         bots: Map[String, BotConfig] = Map.empty)
 
-
   val DEFAULT_CONFIG_FILE = new File(".")
 
   case class Opts(dataPath: String = "flashbot_data",
@@ -40,7 +39,8 @@ object Main {
                   name: String = "",
                   sources: Seq[String] = List.empty,
                   topics: Seq[String] = List.empty,
-                  types: Seq[String] = List.empty)
+                  types: Seq[String] = List.empty,
+                  bots: Seq[String] = List.empty)
 
   private val optsParser = new OptionParser[Opts]("flashbot") {
     head("flashbot", "0.1")
@@ -78,6 +78,9 @@ object Main {
     cmd("server").action((_, c) => c.copy(cmd = "server"))
       .text("Start a local trading server.")
       .children(
+        opt[Seq[String]]('b', "bots")
+          .action((x, c) => c.copy(bots = x))
+          .text("Comma separated list of bots to run"),
         opt[Int]('p', "port")
           .action((x, c) => c.copy(port = x))
           .text("Which port to expose the HTTP API on. Defaults to 9020.")
@@ -140,6 +143,12 @@ object Main {
         })
 
       case "server" =>
+
+        val undefinedBots = opts.bots.toSet.diff(flashbotConfig.bots.keySet)
+        if (undefinedBots.nonEmpty) {
+          throw new RuntimeException(s"Undefined bots: $undefinedBots")
+        }
+
         // Start the trading engine
         val engine = system.actorOf(
           Props(new TradingEngine(
@@ -147,9 +156,11 @@ object Main {
             flashbotConfig.strategies,
             flashbotConfig.data_sources,
             flashbotConfig.exchanges,
-            flashbotConfig.bots)),
+            flashbotConfig.bots.filterKeys(opts.bots.contains(_)))),
           "trading-engine"
         )
+
+        engine ! StartEngine
 
         // Start the HTTP server
         Http().bindAndHandle(api.routes(engine), "localhost", opts.port)

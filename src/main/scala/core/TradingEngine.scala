@@ -10,6 +10,7 @@ import TradingSession._
 import akka.Done
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
+import akka.util.Timeout
 import core.DataSource.DataSourceConfig
 import core.Exchange.ExchangeConfig
 import core.Report._
@@ -50,9 +51,10 @@ class TradingEngine(dataDir: String,
   def processCommand(command: Command): Either[EngineError, Seq[Event]] = command match {
 
     case StartEngine =>
+
       // Start the default bots
       defaultBots.foreach {
-        case (name, BotConfig(strategy, params, initial_balances)) =>
+        case (name, BotConfig(strategy, mode, params, initial_balances)) =>
 
           // First of all, we look for any previous sessions for this bot. If one exists, then
           // take the balance from the last session as the initial balances for this session.
@@ -83,7 +85,7 @@ class TradingEngine(dataDir: String,
             Some(name),
             strategy,
             params,
-            Live,
+            Mode(mode),
             ref,
             initialSessionBalances,
             Report.empty(strategy, params)
@@ -120,8 +122,10 @@ class TradingEngine(dataDir: String,
       // Start the session. We are only waiting for an initialization error, or a confirmation
       // that the session was started, so we don't wait for too long. 1 second should do it.
       try {
-        Await.result(sessionActor ? "start", 1 second) match {
+        implicit val timeout: Timeout = Timeout(1 second)
+        Await.result(sessionActor ? "start", timeout.duration) match {
           case (sessionId: String, micros: Long) =>
+            println("Got session started!!!!!!!!!!!")
             Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
               mode, micros, initialBalances, report) :: Nil)
           case err: EngineError => Left(err)
@@ -264,17 +268,23 @@ object TradingEngine {
 
       case SessionStarted(id, Some(botId), strategyKey, strategyParams, mode,
           micros, balances, report) =>
+        println("session started event")
+
         copy(bots = bots + (botId -> (
           bots.getOrElse[Seq[TradingSessionState]](botId, Seq.empty) :+
             TradingSessionState(id, strategyKey, strategyParams, mode, micros, balances, report))))
 
       case e: SessionUpdated => e match {
         case ReportUpdated(botId, delta) =>
+          println("report updated event")
+
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
             bot.last.updateReport(delta))))
 
         case BalancesUpdated(botId, account, balance) =>
+          println("balances updated event")
+
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
             bot.last.copy(balances = bot.last.balances.updated(account, balance)))))
@@ -324,14 +334,16 @@ object TradingEngine {
                            balances: String,
                            barSize: Option[Duration]) extends Query
 
+  case class BotQuery(botId: String) extends Query
+
   sealed trait Response
   case object Pong extends Response {
     override def toString: String = "pong"
   }
   case class ReportResponse(report: Report) extends Response
+  case class BotResponse(id: String, reports: Seq[Report]) extends Response
 
-  final case class EngineError(private val message: String,
-                               private val cause: Throwable = None.orNull)
+  final case class EngineError(message: String, cause: Throwable = None.orNull)
     extends Exception(message, cause) with Response
 
 }

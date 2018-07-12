@@ -8,7 +8,7 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings, Supervision}
 import akka.stream.scaladsl.Flow
-import io.circe.Decoder
+import io.circe.{Decoder, Json, Printer}
 import io.circe.parser._
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -39,6 +39,9 @@ object Utils {
         }
     }
   }
+
+  private val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
+  def printJson(json: Json): String = printer.pretty(json)
 
   def initResource[R, E](build: E => R): Flow[E, (R, E), NotUsed] =
     Flow[E].scan[Option[(R, E)]](None) {

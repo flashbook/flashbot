@@ -23,11 +23,11 @@ class DualMovingAverageCrossover extends Strategy {
                     short: Int,
                     long: Int)
 
-  val ts = new TimeSeriesGroup
+  var ts: Option[TimeSeriesGroup] = None
   var params: Option[Params] = None
 
-  def product: Pair = parseProductId(params.get.market)
-  lazy val closePrice = new ClosePriceIndicator(ts.get(params.get.exchange, product).get)
+  def product = Pair(params.get.market)
+  lazy val closePrice = new ClosePriceIndicator(ts.get.get(params.get.exchange, product).get)
   lazy val shortEMA = new EMAIndicator(closePrice, params.get.short)
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
 
@@ -35,7 +35,7 @@ class DualMovingAverageCrossover extends Strategy {
                           dataSourceConfigs: Map[String, DataSourceConfig],
                           initialBalances: Map[Account, Double]): List[String] = {
     params = Some(jsonParams.as[Params].right.get)
-    ts.setPeriod(params.get.barSize)
+    ts = Some(new TimeSeriesGroup(params.get.barSize))
     List(s"${params.get.exchange}/${params.get.market}/trades")
   }
 
@@ -43,7 +43,7 @@ class DualMovingAverageCrossover extends Strategy {
     data match {
       case md @ TradeMD(source, topic, Trade(_, _, price, size)) =>
         // Update the time series
-        ts.record(source, md.product, md.micros, price, Some(size))
+        ts.get.record(source, md.product, md.micros, price, Some(size))
 
         // Set the order targets
         val i = shortEMA.getTimeSeries.getEndIndex

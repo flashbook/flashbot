@@ -63,10 +63,12 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                         product, price, quantity, currentTimeMicros, Taker, side)}
 
                 } else if (prices.isDefinedAt(product)) {
+                  println(size, funds)
                   // We may not have aggregate book data, in that case, simply use the last price.
                   fills = fills :+ Fill(
                     clientOid, Some(clientOid), takerFee, product, prices(product),
-                    if (side == Buy) (funds.get * (1 - takerFee)) / prices(product) else size.get,
+                    if (side == Buy) size.getOrElse(funds.get * (1 - takerFee) / prices(product))
+                    else size.get,
                     currentTimeMicros, Taker, side
                   )
 

@@ -1,13 +1,15 @@
 package exchanges
 
+import java.util.concurrent.Executors
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.Uri.Query
 import akka.http.scaladsl.model.headers.RawHeader
-import akka.http.scaladsl.model.{HttpHeader, HttpMethods, HttpRequest, Uri}
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
-import core.{Exchange, LimitOrderRequest, MarketData, MarketOrderRequest, Order, OrderEvent, OrderRequest, Pair, TradingSession}
+import core.{Exchange, LimitOrderRequest, MarketOrderRequest, OrderRequest, Pair}
 import core.Order.{Fill, Taker}
 import core.Order.Side.parseSide
 import io.circe.Json
@@ -24,13 +26,13 @@ import scala.util.{Failure, Success}
 class Binance(params: Json)(implicit val system: ActorSystem,
                             val mat: ActorMaterializer) extends Exchange {
 
-  implicit val ec: ExecutionContext = system.dispatcher
+  implicit val ec: ExecutionContext =
+    ExecutionContext.fromExecutor(Executors.newFixedThreadPool(10))
 
   private val apiKey = root.api_key.string.getOption(params).get
   private val secretKey = root.secret_key.string.getOption(params).get
 
   override def makerFee: Double = .0005
-
   override def takerFee: Double = .0005
 
   override def formatPair(pair: Pair): String = (pair.base + pair.quote).toUpperCase

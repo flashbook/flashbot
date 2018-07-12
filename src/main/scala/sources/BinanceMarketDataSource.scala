@@ -471,9 +471,10 @@ class BinanceMarketDataSource extends DataSource {
               data.foreach(self ! _)
             case Left(_) =>
               // Next try a wrapped T
+              println(message)
               parseJson[StreamWrap[T]](message) match {
-                case Right(data: T) =>
-                  self ! data.data
+                case Right(StreamWrap(_, data)) =>
+                  self ! data
                 case Left(a) =>
                   throw new RuntimeException(a)
               }

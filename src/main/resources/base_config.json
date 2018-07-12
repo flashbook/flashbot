@@ -443,6 +443,7 @@
 
   "strategies": {
     "dmac": "strategies.DualMovingAverageCrossover",
+    "tema": "strategies.TEMACrossover",
     "scalper": "strategies.Scalper",
     "signal": "strategies.ExternalSignal",
     "latency_arb": "strategies.LatencyArbitrage",

@@ -3,7 +3,7 @@ package core
 import io.circe.Json
 import core.Utils.parseProductId
 import core.DataSource.DataSourceConfig
-import core.TradingEngine.TimeSeriesEvent
+import core.Report.TimeSeriesEvent
 import core.TradingSession.{OrderTarget, SessionReportEvent}
 
 /**

@@ -21,11 +21,11 @@ class Scalper extends Strategy {
                     stop: Double,
                     take: Double)
 
-  val ts = new TimeSeriesGroup
+  var ts: Option[TimeSeriesGroup] = None
   var params: Option[Params] = None
 
   def product: Pair = parseProductId(params.get.market)
-  lazy val closePrice = new ClosePriceIndicator(ts.get(params.get.exchange, product).get)
+  lazy val closePrice = new ClosePriceIndicator(ts.get.get(params.get.exchange, product).get)
   lazy val shortEMA = new EMAIndicator(closePrice, params.get.short)
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
   lazy val shortEmaGain = new GainIndicator(shortEMA)
@@ -37,14 +37,14 @@ class Scalper extends Strategy {
                           dataSourceConfig: Map[String, DataSourceConfig],
                           initialBalances: Map[Account, Double]): List[String] = {
     params = Some(jsonParams.as[Params].right.get)
-    ts.setPeriod(params.get.bar_size)
-    List(s"${params.get.exchange}/${params.get.market}/trades")
+    ts = Some(new TimeSeriesGroup(params.get.bar_size))
+    s"${params.get.exchange}/${params.get.market}/trades" :: Nil
   }
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = data match {
     case md @ TradeMD(source, topic, Trade(_, _, price, size)) =>
       // Update the time series
-      ts.record(source, md.product, md.micros, price, Some(size))
+      ts.get.record(source, md.product, md.micros, price, Some(size))
 
       val i = shortEmaGain.getTimeSeries.getEndIndex
       val shortGain = shortEmaGain.getValue(i).doubleValue

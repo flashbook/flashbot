@@ -5,7 +5,7 @@ import io.circe.generic.auto._
 
 package object core {
 
-  case class TimeRange(from: Long = 0, to: Long = Long.MaxValue)
+  case class TimeRange(from: Long, to: Long = Long.MaxValue)
 
   sealed trait PairRole
   case object Base extends PairRole
@@ -14,6 +14,10 @@ package object core {
   case class Pair(base: String, quote: String) {
     override def toString: String = s"${base}_$quote"
     def toSeq: Seq[String] = List(base, quote)
+  }
+
+  object Pair {
+    def apply(str: String): Pair = Utils.parseProductId(str)
   }
 
   case class Trade(id: String, micros: Long, price: Double, size: Double) extends Timestamped
@@ -53,6 +57,7 @@ package object core {
 
 
   case class BotConfig(strategy: String,
+                       mode: String,
                        params: Json,
                        initial_balances: Map[String, Double])
 
