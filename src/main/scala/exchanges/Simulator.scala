@@ -34,14 +34,20 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   override def formatPair(pair: Pair): String = base.formatPair(pair)
 
   override def collect(session: TradingSession,
-                       data: MarketData): (Seq[Order.Fill], Seq[OrderEvent]) = {
+                       data: Option[MarketData]): (Seq[Order.Fill], Seq[OrderEvent]) = {
     var fills = Seq.empty[Order.Fill]
     var events = Seq.empty[OrderEvent]
 
+    // Update the current time
+    if (data.get.micros > currentTimeMicros) {
+      currentTimeMicros = data.get.micros
+    }
+
     // Dequeue and process API requests that have passed the latency threshold
-    while (apiRequestQueue.headOption.exists(_.requestTime + latencyMicros < data.micros)) {
+    while (apiRequestQueue.headOption.exists(_.requestTime + latencyMicros < currentTimeMicros)) {
       apiRequestQueue.dequeue match {
         case (r: APIRequest, rest) =>
+          val evTime = r.requestTime + latencyMicros
           r match {
             case OrderReq(requestTime, req) => req match {
               /**
@@ -60,20 +66,20 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
                   fills = fills ++
                     aggFillOrder(depths(product), side, size, funds.map(_ * (1 - takerFee)))
                       .map { case (price, quantity) => Fill(clientOid, Some(clientOid), takerFee,
-                        product, price, quantity, currentTimeMicros, Taker, side)}
+                        product, price, quantity, evTime, Taker, side)}
 
                 } else if (prices.isDefinedAt(product)) {
-                  println(size, funds)
+//                  println(size, funds)
                   // We may not have aggregate book data, in that case, simply use the last price.
                   fills = fills :+ Fill(
                     clientOid, Some(clientOid), takerFee, product, prices(product),
                     if (side == Buy) size.getOrElse(funds.get * (1 - takerFee) / prices(product))
                     else size.get,
-                    currentTimeMicros, Taker, side
+                    evTime, Taker, side
                   )
 
                 } else {
-                  throw new RuntimeException("No pricing data available for simulation")
+                  throw new RuntimeException(s"No pricing $product data available for simulation")
                 }
 
                 events = events :+
@@ -98,8 +104,6 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
       }
     }
 
-    // Update the current time
-    currentTimeMicros = data.micros
 
     // Update latest depth/pricing data
     data match {
@@ -108,8 +112,8 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
         ???
       case md: AggBookMD =>
         depths = depths + (md.product -> md.data)
-      case md: TradeMD =>
-        prices = prices + (md.product -> md.data.price)
+      case md: Priced =>
+        prices = prices + (md.product -> md.price)
       case _ =>
     }
 
@@ -129,4 +133,6 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
   override def quoteAssetPrecision(pair: Pair): Int = base.quoteAssetPrecision(pair)
 
   override def useFundsForMarketBuys: Boolean = base.useFundsForMarketBuys
+
+  override def lotSize(pair: Pair): Double = base.lotSize(pair)
 }

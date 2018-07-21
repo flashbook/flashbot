@@ -17,8 +17,6 @@ case class Report(strategy: String,
     case CollectionAdd(CollectionEvent(name, item)) => copy(collections = collections +
       (name -> (collections.getOrElse(name, Vector.empty[Json]) :+ item)))
     case event: CandleEvent => event match {
-      case CandleSave(series, candle) =>
-        update(CandleAdd(series, candle))
       case CandleAdd(series, candle) =>
         copy(timeSeries = timeSeries + (series ->
           (timeSeries.getOrElse(series, Vector.empty) :+ candle)))
@@ -28,7 +26,7 @@ case class Report(strategy: String,
     }
   }
 
-  def genDeltas(event: ReportEvent, useSaves: Boolean): Seq[ReportDelta] = (event match {
+  def genDeltas(event: ReportEvent): Seq[ReportDelta] = event match {
     case tradeEvent: TradeEvent =>
       TradeAdd(tradeEvent) :: Nil
 
@@ -37,25 +35,15 @@ case class Report(strategy: String,
 
     case e: PriceEvent =>
       genTimeSeriesDelta[PriceEvent](
-        List("price", e.exchange, e.product.toString).mkString("."), e, _.price)
+        List("price", e.exchange, e.product.toString).mkString("."), e, _.price) :: Nil
 
     case e: BalanceEvent =>
       genTimeSeriesDelta[BalanceEvent](
-        List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance)
+        List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance) :: Nil
 
     case e: TimeSeriesEvent =>
-      genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value)
+      genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value) :: Nil
 
-  }).filter {
-    case e: CandleEvent => e match {
-      case CandleSave(series, candle) =>
-        println("filter a?", e, useSaves)
-        useSaves
-      case _ =>
-        println("filter b?", e, !useSaves)
-        !useSaves
-    }
-    case _ => true
   }
 
   /**
@@ -63,17 +51,14 @@ case class Report(strategy: String,
     */
   private def genTimeSeriesDelta[T <: Timestamped](series: String,
                                                    event: T,
-                                                   valueFn: T => Double): Seq[ReportDelta] = {
+                                                   valueFn: T => Double): ReportDelta = {
     val value = valueFn(event)
     val newBarMicros = (event.micros / barSize.toMicros) * barSize.toMicros
     val currentTS = timeSeries.getOrElse(series, Vector.empty)
-    if (currentTS.lastOption.exists(_.micros == newBarMicros)) {
-      CandleUpdate(series, currentTS.last) :: Nil
-    } else {
-      val addList = CandleAdd(series, Candle(newBarMicros, value, value, value, value)) :: Nil
-      if (currentTS.nonEmpty) CandleSave(series, currentTS.last) :: addList
-      else addList
-    }
+    if (currentTS.lastOption.exists(_.micros == newBarMicros))
+      CandleUpdate(series, currentTS.last.add(value))
+    else
+      CandleAdd(series, Candle(newBarMicros, value, value, value, value))
   }
 }
 
@@ -93,7 +78,6 @@ object Report {
     def series: String
   }
   case class CandleUpdate(series: String, candle: Candle) extends CandleEvent
-  case class CandleSave(series: String, candle: Candle) extends CandleEvent
   case class CandleAdd(series: String, candle: Candle) extends CandleEvent
 
   case class Candle(micros: Long, open: Double, high: Double, low: Double, close: Double)

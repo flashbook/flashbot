@@ -88,8 +88,7 @@ class TradingEngine(dataDir: String,
             Mode(mode),
             ref,
             initialSessionBalances,
-            // TODO: Remove 1 second, make default, which is 1 minute
-            Report.empty(strategy, params, Some(1 second))
+            Report.empty(strategy, params)
           )
       }
       Right(EngineStarted(Utils.currentTimeMicros) :: Nil)
@@ -123,13 +122,14 @@ class TradingEngine(dataDir: String,
       // Start the session. We are only waiting for an initialization error, or a confirmation
       // that the session was started, so we don't wait for too long. 1 second should do it.
       try {
-        implicit val timeout: Timeout = Timeout(1 second)
+        implicit val timeout: Timeout = Timeout(10 seconds)
         Await.result(sessionActor ? "start", timeout.duration) match {
           case (sessionId: String, micros: Long) =>
             println("Got session started!!!!!!!!!!!")
             Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
               mode, micros, initialBalances, report) :: Nil)
-          case err: EngineError => Left(err)
+          case err: EngineError =>
+            Left(err)
         }
       } catch {
         case err: TimeoutException =>
@@ -140,14 +140,19 @@ class TradingEngine(dataDir: String,
       * A bot session emitted a ReportEvent. Here is where we decide what to do about it by
       * emitting the ReportDeltas that we'd like to persist in state. Specifically, if there
       * is a balance event, we want to save that to state. In addition to that, we always
-      * generate report deltas and save those, except for candle update and creates. Only saves.
+      * generate report deltas and save those.
       */
     case ProcessBotSessionEvent(botId, event) =>
-      val deltas = state.bots(botId).last.report.genDeltas(event, useSaves = true)
+      if (!state.bots.isDefinedAt(botId)) {
+        println("ignoring")
+        return Right(Seq.empty)
+      }
+
+      val deltas = state.bots(botId).last.report.genDeltas(event)
         .map(ReportUpdated(botId, _))
         .toList
 
-      println("processing bot session event", event, deltas)
+//      println("processing bot session event", event, deltas)
 
       Right(event match {
         case BalanceEvent(account, balance, micros) =>
@@ -193,6 +198,9 @@ class TradingEngine(dataDir: String,
           BotResponse(id, bot.map(_.report))
         }.toSeq)
 
+      case StrategiesQuery() =>
+        sender ! StrategiesResponse(strategyClassNames.keys.map(StrategyResponse).toList)
+
       /**
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
         * all session events into a stream that we fold over to create a report.
@@ -216,8 +224,7 @@ class TradingEngine(dataDir: String,
           val (ref: ActorRef, fut: Future[Report]) =
             Source.actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
               .toMat(Sink.fold[Report, ReportEvent](report) {
-                (report, event) =>
-                  report.genDeltas(event, useSaves = false).foldLeft(report)(_.update(_))
+                (report, event) => report.genDeltas(event).foldLeft(report)(_.update(_))
               })(Keep.both)
               .run
 
@@ -280,23 +287,17 @@ object TradingEngine {
 
       case SessionStarted(id, Some(botId), strategyKey, strategyParams, mode,
           micros, balances, report) =>
-        println("session started event")
-
         copy(bots = bots + (botId -> (
           bots.getOrElse[Seq[TradingSessionState]](botId, Seq.empty) :+
             TradingSessionState(id, strategyKey, strategyParams, mode, micros, balances, report))))
 
       case e: SessionUpdated => e match {
         case ReportUpdated(botId, delta) =>
-          println("report updated event")
-
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
             bot.last.updateReport(delta))))
 
         case BalancesUpdated(botId, account, balance) =>
-          println("balances updated event")
-
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
             bot.last.copy(balances = bot.last.balances.updated(account, balance)))))
@@ -348,6 +349,7 @@ object TradingEngine {
 
   case class BotQuery(botId: String) extends Query
   case class BotsQuery() extends Query
+  case class StrategiesQuery() extends Query
 
   sealed trait Response
   case object Pong extends Response {
@@ -356,6 +358,8 @@ object TradingEngine {
   case class ReportResponse(report: Report) extends Response
   case class BotResponse(id: String, reports: Seq[Report]) extends Response
   case class BotsResponse(bots: Seq[BotResponse]) extends Response
+  case class StrategyResponse(name: String) extends Response
+  case class StrategiesResponse(strats: Seq[StrategyResponse]) extends Response
 
   final case class EngineError(message: String, cause: Throwable = None.orNull)
     extends Exception(message, cause) with Response

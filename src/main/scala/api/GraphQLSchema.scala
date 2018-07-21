@@ -30,6 +30,8 @@ object GraphQLSchema {
     case class ExchangeBalances(exchange: String, accounts: List[AccountBalances])
     val ExchangeBalancesType = deriveObjectType[UserCtx, ExchangeBalances]()
 
+    val StrategyType = deriveObjectType[UserCtx, StrategyResponse]()
+
 //    case class BalanceSeries(name: String, data: Vector[Double])
 //    val BalanceSeriesType = deriveObjectType[UserCtx, BalanceSeries]()
 //
@@ -122,7 +124,13 @@ object GraphQLSchema {
         * Query for all bots, without their reports.
         */
       Field("bots", ListType(BotType),
-        resolve = c => c.ctx.request[BotsResponse](BotsQuery()).bots)
+        resolve = c => c.ctx.request[BotsResponse](BotsQuery()).bots),
+
+      /**
+        * Query for all loaded strategies.
+        */
+      Field("strategies", ListType(StrategyType),
+        resolve = c => c.ctx.request[StrategiesResponse](StrategiesQuery()).strats)
     ))
 
 //    val MutationType = ObjectType("Mutation", fields[UserCtx, Unit](

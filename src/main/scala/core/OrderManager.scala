@@ -4,7 +4,6 @@ import core.Action.{ActionQueue, PostMarketOrder}
 import core.TradingSession.OrderTarget
 
 import scala.collection.immutable.Queue
-import java.util.UUID.randomUUID
 
 import core.Order.{Buy, Sell, Side}
 
@@ -69,8 +68,15 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty) {
                 else
                   (None, None, None)
 
+              val lotSize = exchange.lotSize(pair)
+              val finalSize =
+                size.map(s => (s / lotSize).toLong * BigDecimal(lotSize)).map(_.doubleValue)
+              println("POST Market Order", pair, side, size, lotSize, finalSize)
+              println("Balances: ", balances.get(base), balances.get(quote))
+              println("Price: ", prices(pair))
               if (side.nonEmpty)
-                List(PostMarketOrder(randomUUID.toString, target.id, pair, side.get, size, funds))
+                List(PostMarketOrder(exchange.genOrderId, target.id, pair, side.get,
+                  finalSize, funds))
               else
                 Nil
 

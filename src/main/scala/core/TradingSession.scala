@@ -1,6 +1,6 @@
 package core
 
-import java.util.UUID
+import java.util.{Date, UUID}
 import java.util.concurrent.Executors
 
 import akka.NotUsed
@@ -181,7 +181,9 @@ object TradingSession {
               classOf[Json], classOf[ActorSystem], classOf[ActorMaterializer])
               .newInstance(exchangeConfigs(srcKey).params, system, mat)
             instance.setTickFn(() => {
-              tickRefOpt.foreach(_ ! Tick(srcKey))
+              tickRefOpt.foreach { ref =>
+                ref ! Tick(srcKey)
+              }
             })
             exchanges = exchanges + (srcKey -> (
               if (mode == Live) instance
@@ -331,19 +333,14 @@ object TradingSession {
               case Left(md: MarketData) => (None, Some(md))
             }
 
+            val ex = data.map(_.source).getOrElse(tick.get.exchange)
+
             // Update the relevant exchange with the market data to collect fills and user data
-            var fills: Option[scala.Seq[Fill]] = None
-            var userData: Option[scala.Seq[OrderEvent]] = None
-            if (data.exists(data => exchanges.isDefinedAt(data.source))) {
-              exchanges(data.get.source).collect(session, data.get) match {
-                case (_f, _d) =>
-                  fills = Some(_f)
-                  userData = Some(_d)
-              }
-            }
+            // TODO: This doesn't support non-exchange data sources yet
+            val (fills, userData) = exchanges(ex).collect(session, data)
 
             // The user data is relayed to the strategy as StrategyEvents
-            userData.foreach(_.foreach(strategy.handleEvent))
+            userData.foreach(strategy.handleEvent)
 
             // Use a sequence number to enforce the rule that Session.handleEvents is only
             // allowed to be called in the current call stack. Send market data to strategy,
@@ -374,24 +371,21 @@ object TradingSession {
             data match {
               case Some(pd: Priced) => // I love pattern matching on types.
                 newPrices += (Market(pd.exchange, pd.product) -> pd.price)
-                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
+                // TODO: Emit prices here
+//                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
               case _ =>
             }
 
-
-            // Update ids and actions bookkeeping state in response to fills and user data emitted
-            // from the relevant exchange.
-            val ex = data.map(_.source).getOrElse(tick.get.exchange)
-
             def acc(currency: String) = Account(ex, currency)
 
-            userData.get.foldLeft((newIds, newActions)) {
+            userData.foldLeft((newIds, newActions)) {
               /**
                 * Either market or limit order received by the exchange. Associate the client id
                 * with the exchange id. Do not close any actions yet. Wait until the order is
                 * open, in the case of limit order, or done if it's a market order.
                 */
               case ((is, as), OrderReceived(id, _, clientId, _)) =>
+                println("order received", id, clientId)
                 (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
 
               /**
@@ -406,6 +400,7 @@ object TradingSession {
                 * the action for the order id.
                 */
               case ((is, as), OrderDone(id, _, _, _, _, _)) =>
+                println("order done", id)
                 (is.updated(ex, is(ex).orderComplete(id)),
                   as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
 
@@ -415,9 +410,9 @@ object TradingSession {
                 newActions = _newActions
             }
 
-            newBalances = fills.get.foldLeft(newBalances) {
+            newBalances = fills.foldLeft(newBalances) {
               case (bs, Fill(_, tradeId, fee, pair@Pair(base, quote), price, size,
-              micros, liquidity, side)) =>
+                  micros, liquidity, side)) =>
 
                 val ret = side match {
                   /**
@@ -455,6 +450,10 @@ object TradingSession {
                 emitReportEvent(TradeEvent(tradeId, ex, pair.toString, micros, price, size))
 
                 // Also balance info
+                val rb = ret(acc(base))
+                val rq = ret(acc(quote))
+                val t = Utils.formatDate(new Date(micros / 1000))
+//                println(s"emitting balance event for ($base, $quote) ($rb, $rq) at $t")
                 emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), micros))
                 emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), micros))
 
@@ -594,5 +593,5 @@ trait TradingSession {
   def id: String
   def balances: Map[Account, Double]
   def handleEvents(events: Event*): Unit
-
+  def actionQueues: Map[String, ActionQueue]
 }

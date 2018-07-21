@@ -3,13 +3,13 @@ package core
 import core.Order.{Fill, Side}
 import io.circe.Json
 import io.circe.generic.auto._
+import java.util.UUID.randomUUID
 
 object Exchange {
   final case class ExchangeConfig(`class`: String, params: Json)
 }
 
 abstract class Exchange {
-
 
   def makerFee: Double
   def takerFee: Double
@@ -23,6 +23,7 @@ abstract class Exchange {
 
   def baseAssetPrecision(pair: Pair): Int
   def quoteAssetPrecision(pair: Pair): Int
+  def lotSize(pair: Pair): Double
 
   def useFundsForMarketBuys: Boolean
 
@@ -42,12 +43,14 @@ abstract class Exchange {
     * trading session.
     */
   def collect(session: TradingSession,
-                       data: MarketData): (Seq[Fill], Seq[OrderEvent]) = {
+                       data: Option[MarketData]): (Seq[Fill], Seq[OrderEvent]) = {
     val ret = (fills, events)
     fills = Seq.empty
     events = Seq.empty
     ret
   }
+
+  def genOrderId: String = randomUUID.toString
 }
 
 sealed trait OrderRequest {

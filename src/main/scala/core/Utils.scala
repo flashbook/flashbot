@@ -1,7 +1,9 @@
 package core
 
+import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.Date
 import java.util.concurrent.TimeUnit.{DAYS, HOURS, MILLISECONDS, MINUTES, SECONDS}
 
 import akka.NotUsed
@@ -82,4 +84,21 @@ object Utils {
   }
 
   def currentTimeMicros: Long = System.currentTimeMillis * 1000
+
+  private val timeFmt = new SimpleDateFormat("yyyy-mm-dd hh:mm:ss")
+  def formatDate(date: Date): String = timeFmt.format(date)
+
+  val longVal: Regex = raw"^([0-9]+)$$".r
+  val rmDot: Regex = raw"^([0-9]+)\.0+$$".r
+  val doubleVal: Regex = raw"^([0-9]+)(\.[0-9]*[1-9])0*$$".r
+
+  /**
+    * Removes the trailing zeroes (and the period, if applicable) from the string representation
+    * of a number.
+    */
+  def stripTrailingZeroes(d: String): String = d match {
+    case longVal(v: String) => v
+    case rmDot(v: String) => v
+    case doubleVal(a: String, b: String) => a + b
+  }
 }
