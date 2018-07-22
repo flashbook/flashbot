@@ -420,6 +420,16 @@
       }
     },
 
+    "cryptopia": {
+      "class": "sources.CryptopiaDataSource",
+      "topics": {},
+      "data_types": {
+        "book_10": {
+          "retention": "90d"
+        }
+      }
+    },
+
     "twitter": {
       "class": "sources.TwitterSearchDataSource",
       "topics": {

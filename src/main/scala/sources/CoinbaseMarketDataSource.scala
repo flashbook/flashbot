@@ -97,6 +97,7 @@ class CoinbaseMarketDataSource extends DataSource {
     parseBuiltInDataType(dataType) match {
       case Some(x) => (x, timeRange) match {
 
+
         case (FullBook, TimeRange(from, to)) =>
           val snapshotQueue =
             timeLog[SnapshotItem](dataDir, parseProductId(topic), "book/snapshots")
