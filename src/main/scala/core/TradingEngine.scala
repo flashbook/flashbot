@@ -125,7 +125,6 @@ class TradingEngine(dataDir: String,
         implicit val timeout: Timeout = Timeout(10 seconds)
         Await.result(sessionActor ? "start", timeout.duration) match {
           case (sessionId: String, micros: Long) =>
-            println("Got session started!!!!!!!!!!!")
             Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
               mode, micros, initialBalances, report) :: Nil)
           case err: EngineError =>

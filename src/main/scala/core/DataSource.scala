@@ -1,13 +1,15 @@
 package core
 
-import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Sink, Source}
 import io.circe.Json
-import io.circe.generic.auto._
 
 abstract class DataSource {
+
+  def index(implicit sys: ActorSystem,
+            mat: ActorMaterializer): Set[String] =
+    throw new NotImplementedError
+
   def ingest(dataDir: String,
              topics: Map[String, Json],
              dataTypes: Map[String, DataSource.DataTypeConfig])

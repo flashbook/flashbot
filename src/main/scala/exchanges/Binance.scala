@@ -39,7 +39,7 @@ class Binance(params: Json)(implicit val system: ActorSystem,
   override def makerFee: Double = .0005
   override def takerFee: Double = .0005
 
-  override def formatPair(pair: Pair): String = (pair.base + pair.quote).toUpperCase
+  def formatPair(pair: Pair): String = (pair.base + pair.quote).toUpperCase
 
   case class FillRaw(price: String,
                      qty: String,

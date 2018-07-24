@@ -114,13 +114,57 @@ object TradingSession {
           return Left(EngineError(s"Strategy instantiation error: $strategyKey", err))
       }
 
+      var dataSources = Map.empty[String, DataSource]
+      def loadDataSource(srcKey: String): DataSource = {
+        // If it is already loaded, do nothing.
+        if (dataSources.contains(srcKey)) {
+          return dataSources(srcKey)
+        }
+
+        // Check that we can find its class name
+        if (!dataSourceClassNames.isDefinedAt(srcKey)) {
+          throw EngineError(s"Unknown data source: $srcKey")
+        }
+
+        var dataSourceClassOpt: Option[Class[_ <: DataSource]] = None
+        try {
+          dataSourceClassOpt = Some(getClass.getClassLoader
+            .loadClass(dataSourceClassNames(srcKey))
+            .asSubclass(classOf[DataSource]))
+        } catch {
+          case err: ClassNotFoundException =>
+            throw EngineError(s"Data source class not found: " +
+              s"${dataSourceClassNames(srcKey)}", err)
+          case err: ClassCastException =>
+            throw EngineError(s"Class ${dataSourceClassNames(srcKey)} must be a " +
+              s"subclass of io.flashbook.core.DataSource", err)
+        }
+
+        try {
+          val dataSource = dataSourceClassOpt.get.newInstance
+          dataSources = dataSources + (srcKey -> dataSource)
+          dataSource
+        } catch {
+          case err: Throwable =>
+            throw EngineError(s"Data source instantiation error: $srcKey", err)
+        }
+      }
+
       // Initialize the strategy and collect the data source addresses it returns
       var dataSourceAddresses = Seq.empty[Address]
       try {
+        val expandedDataSourceConfigs = dataSourceConfigs.map {
+          case (k, c) => (k, c.copy(topics = c.topics.flatMap {
+            case ("*", value: Json) => loadDataSource(k).index.toSeq.map((_, value))
+            case kv: (String, Json) => Seq(kv)
+          }))
+        }
         dataSourceAddresses = strategyOpt.get
-          .initialize(strategyParams, dataSourceConfigs, initialBalances)
+          .initialize(strategyParams, expandedDataSourceConfigs, initialBalances)
           .map(DataSource.parseAddress)
       } catch {
+        case err: EngineError =>
+          return Left(err)
         case err: Throwable =>
           return Left(EngineError(s"Strategy initialization error: $strategyKey", err))
       }
@@ -133,32 +177,13 @@ object TradingSession {
 
       // Validate and load requested data sources.
       // Also load exchanges instances while we're at it.
-      var dataSources = Map.empty[String, DataSource]
       var exchanges = Map.empty[String, Exchange]
       for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
-        if (!dataSourceClassNames.isDefinedAt(srcKey)) {
-          return Left(EngineError(s"Unknown data source: $srcKey"))
-        }
-
-        var dataSourceClassOpt: Option[Class[_ <: DataSource]] = None
         try {
-          dataSourceClassOpt = Some(getClass.getClassLoader
-            .loadClass(dataSourceClassNames(srcKey))
-            .asSubclass(classOf[DataSource]))
+          loadDataSource(srcKey)
         } catch {
-          case err: ClassNotFoundException =>
-            return Left(EngineError(s"Data source class not found: " +
-              s"${dataSourceClassNames(srcKey)}", err))
-          case err: ClassCastException =>
-            return Left(EngineError(s"Class ${dataSourceClassNames(srcKey)} must be a " +
-              s"subclass of io.flashbook.core.DataSource", err))
-        }
-
-        try {
-          dataSources = dataSources + (srcKey -> dataSourceClassOpt.get.newInstance)
-        } catch {
-          case err: Throwable =>
-            return Left(EngineError(s"Data source instantiation error: $srcKey", err))
+          case err: EngineError =>
+            return Left(err)
         }
 
         if (exchangeConfigs.isDefinedAt(srcKey)) {
@@ -219,6 +244,8 @@ object TradingSession {
       case SessionSetup(markets, dataSourceAddresses, dataSources, exchanges,
           strategy, sessionId, sessionMicros) =>
         var currentStrategySeqNr: Option[Long] = None
+
+        println("running session")
 
         /**
           * The trading session that we fold market data over. We pass the running session instance
@@ -289,6 +316,10 @@ object TradingSession {
           ExecutionContext.fromExecutor(
             Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
 
+        println("size:", dataSourceAddresses.size)
+
+        var count = 0
+
         // Merge market data streams from the data sources we just loaded and stream the data into
         // the strategy instance. If this trading session is a backtest then we merge the data
         // streams by time. But if this is a live trading session then data is sent first come,
@@ -297,7 +328,10 @@ object TradingSession {
           .groupBy(_.srcKey)
           .flatMap { case (key, addresses) =>
             addresses.map {
-              case Address(_, topic, dataType) =>
+              case a @ Address(_, topic, dataType) =>
+
+                count += 1
+                println("doing address", count, a)
 
                 val it = dataSources(key).stream(dataDir, topic, dataType, mode match {
                   case Backtest(range) => range
@@ -370,7 +404,12 @@ object TradingSession {
             // If this data has price info attached, emit that price info.
             data match {
               case Some(pd: Priced) => // I love pattern matching on types.
-                newPrices += (Market(pd.exchange, pd.product) -> pd.price)
+                try {
+                  newPrices += (Market(pd.exchange, pd.product) -> pd.price)
+                } catch {
+                  case err: Throwable =>
+//                    log.warning(s"Error retreiving price for ${pd.product}")
+                }
                 // TODO: Emit prices here
 //                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
               case _ =>

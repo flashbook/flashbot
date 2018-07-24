@@ -31,7 +31,6 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
 
   override def makerFee: Double = base.makerFee
   override def takerFee: Double = base.takerFee
-  override def formatPair(pair: Pair): String = base.formatPair(pair)
 
   override def collect(session: TradingSession,
                        data: Option[MarketData]): (Seq[Order.Fill], Seq[OrderEvent]) = {
@@ -106,7 +105,7 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
 
 
     // Update latest depth/pricing data
-    data match {
+    data.get match {
       case md: OrderBookMD[_] =>
         // TODO: Turn aggregate full order books into aggregate depths here
         ???

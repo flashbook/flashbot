@@ -12,6 +12,10 @@
     "bitmex": {
       "class": "exchanges.BitMEX",
       "params": {}
+    },
+    "cryptopia": {
+      "class": "exchanges.Cryptopia",
+      "params": {}
     }
   },
 
@@ -422,7 +426,9 @@
 
     "cryptopia": {
       "class": "sources.CryptopiaDataSource",
-      "topics": {},
+      "topics": {
+        "*": {}
+      },
       "data_types": {
         "book_10": {
           "retention": "90d"
@@ -459,7 +465,8 @@
     "latency_arb": "strategies.LatencyArbitrage",
     "twitter_vol": "strategies.TwitterVolumeTrader",
     "random": "strategies.OrderRandomly",
-    "secret_a": "strategies.SecretA"
+    "secret_a": "strategies.SecretA",
+    "secret_b": "strategies.SecretB"
   },
 
   "currencies": {

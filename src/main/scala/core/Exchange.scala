@@ -14,9 +14,6 @@ abstract class Exchange {
   def makerFee: Double
   def takerFee: Double
 
-  // TODO: Does this need to exist on the abstract class level?
-  def formatPair(pair: Pair): String
-
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
   def cancel(id: String): Unit
@@ -25,7 +22,7 @@ abstract class Exchange {
   def quoteAssetPrecision(pair: Pair): Int
   def lotSize(pair: Pair): Double
 
-  def useFundsForMarketBuys: Boolean
+  def useFundsForMarketBuys: Boolean = false
 
   var tick: () => Unit = () => {}
   def setTickFn(fn: () => Unit): Unit = {

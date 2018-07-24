@@ -10,9 +10,12 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import core.AggBook._
+import core.{AggBook => _, _}
 import core.{Ask, Bid, DataSource, MarketData, Pair, Timestamped, Utils}
-import core.Utils.initResource
+import core.Utils.{initResource, parseProductId}
+import core.DataSource._
 import data.TimeLog
+import data.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
@@ -25,6 +28,7 @@ import scala.util.{Failure, Success}
 class CryptopiaDataSource extends DataSource {
 
   val SRC = "cryptopia"
+  val BOOK_DEPTH = 10
 
   implicit val ec: ExecutionContext =
     ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
@@ -65,18 +69,47 @@ class CryptopiaDataSource extends DataSource {
       scala.collection.immutable.Queue(pairs.values.toSeq.flatten:_*)
   }
 
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+  override def index(implicit sys: ActorSystem,
+                     mat: ActorMaterializer): Set[String] = {
 
-    // Load markets
     val markets = Await.result(Http().singleRequest(HttpRequest(
       method = HttpMethods.GET,
       uri = "https://www.cryptopia.co.nz/api/GetMarkets"
     )).flatMap(rsp =>
       Unmarshal(rsp.entity).to[CryptopiaResponse[Seq[CryptopiaMarket]]]
-    ), 5 seconds).Data.map(m => (m.Label, m)).toMap
+    ), 5 seconds).Data
+      .map(m => m.copy(Label = m.Label.toLowerCase.replaceAll("/", "_")))
+      .groupBy(_.Label.split("_").last)
+      .mapValues(_.sortWith((a, b) => a.Volume > b.Volume).take(50))
+      .values
+      .flatten
+      .groupBy(_.Label)
+      .mapValues(_.head)
+
+    println(s"markets size: ${markets.size}")
+
+    Await.result(Http().singleRequest(HttpRequest(
+      method = HttpMethods.GET,
+      uri = "https://www.cryptopia.co.nz/api/GetTradePairs"
+    )).flatMap(rsp =>
+      Unmarshal(rsp.entity).to[CryptopiaResponse[Seq[TradePair]]]
+    ), 5 seconds).Data
+      .map(m => m.copy(Label = m.Label.toLowerCase.replaceAll("/", "_")))
+      .filter(_.Status == "OK")
+      .filter(markets isDefinedAt _.Label)
+      .filter(m => markets(m.Label).Volume > 0)
+      .map(_.Label).toSet
+  }
+
+  override def ingest(dataDir: String,
+                      topics: Map[String, Json],
+                      dataTypes: Map[String, DataSource.DataTypeConfig])
+                     (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+
+    val newTopics = topics.toSeq.flatMap {
+      case ("*", value) => index.toSeq.map((_, value))
+      case kv => Seq(kv)
+    }.toMap
 
     // Load trade pairs
     val tradePairs = Await.result(Http().singleRequest(HttpRequest(
@@ -86,28 +119,24 @@ class CryptopiaDataSource extends DataSource {
       Unmarshal(rsp.entity).to[CryptopiaResponse[Seq[TradePair]]]
     ), 5 seconds).Data
       .filter(_.Status == "OK")
+      .filter(newTopics contains _.Label.toLowerCase.replaceAll("/", "_"))
       .groupBy(_.BaseSymbol)
-      .mapValues(_.sortWith((a, b) =>
-        markets(a.Label).BaseVolume < markets(b.Label).BaseVolume))
       // Batches of 5
       .mapValues(_.grouped(5).toSeq)
 
     val bookStream = Source
       .actorRef(Int.MaxValue, OverflowStrategy.fail)
       .via(Flow[(Orders, Long)].map(a => ordersToAggBookMD(a._1, a._2)))
+      .groupBy(10000, _.product)
       .via(initResource(md =>
         timeLog[AggBookMD](dataDir, md.product, md.dataType)))
-      .to(Sink.foreach { case (timeLog, book) =>
-        println("Saving agg book", book)
-        timeLog.enqueue(book)
+      .to(Sink.foreach {
+        case (timeLog, book) =>
+          timeLog.enqueue(book)
       })
       .run
 
-    val numBatches = tradePairs.values.map(_.length).sum
-    val orderService = sys.actorOf(Props(
-      new OrderFetchService(tradePairs, bookStream)))
-
-    println("Number of batches: " + numBatches)
+    sys.actorOf(Props(new OrderFetchService(tradePairs, bookStream)))
   }
 
   private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
@@ -117,7 +146,12 @@ class CryptopiaDataSource extends DataSource {
                       topic: String,
                       dataType: String,
                       timeRange: core.TimeRange): Iterator[MarketData] = {
-    ???
+    parseBuiltInDataType(dataType) match {
+      case Some(DepthBook(BOOK_DEPTH)) =>
+        var tl: TimeLog[AggBookMD] = timeLog[AggBookMD](dataDir, parseProductId(topic), dataType)
+        val it = tl.scan[Long](timeRange.from, _.micros, md => md.micros < timeRange.to)()
+        for (item <- it) yield item.copy(data = item.data.convertToTreeMaps)
+    }
   }
 
   def fetchOrders(pairs: Seq[Pair])(implicit sys: ActorSystem,
@@ -149,7 +183,7 @@ class CryptopiaDataSource extends DataSource {
     var book = AggBook(math.max(orders.Buy.length, orders.Sell.length))
     book = orders.Buy.foldRight(book) { case (order, memo) =>
       memo.updateLevel(Bid, order.Price, order.Volume)}
-    book = orders.Buy.foldRight(book) { case (order, memo) =>
+    book = orders.Sell.foldRight(book) { case (order, memo) =>
       memo.updateLevel(Ask, order.Price, order.Volume)}
     AggBookMD(SRC, orders.Market.toLowerCase, micros, book)
   }

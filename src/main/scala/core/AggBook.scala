@@ -3,13 +3,14 @@ package core
 import core.MarketData.GenMD
 import core.Order.{Buy, Sell, Side}
 import core.Utils.parseProductId
+import io.circe._
 import io.circe.{KeyDecoder, KeyEncoder}
-import io.circe.generic.auto._
+import io.circe.generic.semiauto._
 
 import scala.collection.immutable.TreeMap
 
-
 object AggBook {
+
 
   implicit val doubleKeyEncoder: KeyEncoder[Double] = new KeyEncoder[Double] {
     override def apply(key: Double): String = key.toString
@@ -36,6 +37,9 @@ object AggBook {
       bids = toTreeMap(bids)
     )
   }
+
+  implicit val aggBookDecoder: Decoder[AggBook] = deriveDecoder[AggBook]
+  implicit val aggBookEncoder: Encoder[AggBook] = deriveEncoder[AggBook]
 
   def toTreeMap(map: Map[Double, Double]): TreeMap[Double, Double] =
     map.foldLeft(TreeMap.empty[Double, Double])(_ + _)
@@ -102,6 +106,9 @@ object AggBook {
       (data.asks.asInstanceOf[TreeMap[Double, Double]].head._1 +
         data.bids.asInstanceOf[TreeMap[Double, Double]].last._1) / 2
   }
+
+  implicit val aggBookMDDecoder: Decoder[AggBookMD] = deriveDecoder[AggBookMD]
+  implicit val aggBookMDEncoder: Encoder[AggBookMD] = deriveEncoder[AggBookMD]
 
   private def updateMap(map: Map[Double, Double],
                         priceLevel: Double,
