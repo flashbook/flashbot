@@ -5,16 +5,16 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
-import com.pusher.client.channel.{Channel, ChannelEventListener, SubscriptionEventListener}
-import com.pusher.client.connection.{ConnectionEventListener, ConnectionState, ConnectionStateChange}
-import com.pusher.client.{Pusher, PusherOptions}
+import com.pusher.client.channel.{ChannelEventListener, SubscriptionEventListener}
+import com.pusher.client.connection.{ConnectionEventListener, ConnectionStateChange}
+import com.pusher.client.Pusher
 import core.Order.{Buy, Sell}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
-import core.{Canceled, DataSource, Filled, MarketData, OrderBook, OrderChange, OrderDone, OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange}
+import core.{Canceled, DataSource, Filled, MarketData, OrderChange, OrderDone,
+  OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange}
 import core.Utils.parseProductId
 import io.circe.Json
 import io.circe.optics.JsonPath._
-import io.circe.generic.auto._
 import io.circe.parser._
 
 import scala.collection.immutable.Queue
