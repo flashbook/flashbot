@@ -436,6 +436,27 @@
       }
     },
 
+    "bitstamp": {
+      "class": "sources.BitstampMarketDataSource",
+      "topics": {
+        "btc_usd": {},
+        "xrp_usd": {},
+        "eth_usd": {},
+        "bch_usd": {},
+        "ltc_usd": {},
+
+        "xrp_btc": {},
+        "ltc_btc": {},
+        "eth_btc": {},
+        "bch_btc": {}
+      },
+      "data_types": {
+        "book": {
+          "retention": "90d"
+        }
+      }
+    },
+
     "twitter": {
       "class": "sources.TwitterSearchDataSource",
       "topics": {

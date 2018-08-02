@@ -13,7 +13,7 @@ lazy val akkaVersion = "2.5.11"
 lazy val akkaHttpVersion = "10.1.0"
 lazy val circeVersion = "0.9.0"
 
-lazy val akkaDeps = List(
+lazy val networkDeps = List(
   // Akka libs
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-stream" % akkaVersion,
@@ -30,7 +30,10 @@ lazy val akkaDeps = List(
 //  "com.github.andyglow" %% "websocket-scala-client" % "0.2.4" % Compile,
   "org.java-websocket" % "Java-WebSocket" % "1.3.8",
 
-  "de.heikoseeberger" %% "akka-http-circe" % "1.20.0"
+  "de.heikoseeberger" %% "akka-http-circe" % "1.20.0",
+
+  // Pusher
+  "com.pusher" % "pusher-java-client" % "1.8.1"
 )
 
 lazy val testDeps = List(
@@ -85,7 +88,7 @@ lazy val root = project.in(file("."))
       case other => other
     }
   }))
-  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
+  .settings(libraryDependencies ++= (serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLDeps ++
     dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
 
 
