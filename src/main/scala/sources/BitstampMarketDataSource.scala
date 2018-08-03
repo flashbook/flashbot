@@ -1,21 +1,22 @@
 package sources
 
-import akka.actor.{Actor, ActorRef, ActorSystem}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.scaladsl.{Sink, Source}
 import com.pusher.client.channel.{ChannelEventListener, SubscriptionEventListener}
 import com.pusher.client.connection.{ConnectionEventListener, ConnectionStateChange}
 import com.pusher.client.Pusher
 import core.Order.{Buy, Sell}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
-import core.{Canceled, DataSource, Filled, MarketData, OrderChange, OrderDone,
-  OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange}
+import core.{Canceled, DataSource, Filled, MarketData, OrderChange, OrderDone, OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange}
 import core.Utils.parseProductId
 import io.circe.Json
 import io.circe.optics.JsonPath._
 import io.circe.parser._
+import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
 
 import scala.collection.immutable.Queue
 import scala.concurrent.Future
@@ -80,9 +81,45 @@ object BitstampMarketDataSource {
   class BitstampOrderBookProvider(pair: Pair,
                                   pusher: Pusher,
                                   bookReceiver: ActorRef) extends Actor {
+    private val pairStr = formatPair(pair)
     private var seenEvent = false
     private var eventQueue = Queue.empty[BitstampBookEvent]
     private var state: Option[OrderBookMD[BitstampBookEvent]] = None
+
+    // Subscribe to the live orders channel for this pair
+    private val channel = pusher.subscribe(s"live_orders_$pairStr", new ChannelEventListener {
+      override def onSubscriptionSucceeded(channelName: String): Unit = {
+        println(s"Subscribed to $channelName")
+      }
+
+      override def onEvent(channelName: String, eventName: String, data: String): Unit = {
+        println("Channel event", eventName, data)
+      }
+    })
+
+    def bindEvent(event: String): Unit = {
+      channel.bind(event, new SubscriptionEventListener {
+        override def onEvent(channelName: String, eventName: String, data: String): Unit = {
+          val json = parse(data).right.get
+          val event = BitstampBookEvent(
+            eventName,
+            pair.toString,
+            root.event_type.int.getOption(json).get,
+            root.price.double.getOption(json).get,
+            root.datetime.string.getOption(json).get,
+            root.amount.double.getOption(json).get,
+            root.id.long.getOption(json).get,
+            root.microtimestamp.string.getOption(json).get
+          )
+          self ! event
+        }
+      })
+    }
+
+    // Bind events
+    bindEvent(CREATED)
+    bindEvent(CHANGED)
+    bindEvent(DELETED)
 
     override def receive: Receive = {
       case event: BitstampBookEvent =>
@@ -145,6 +182,14 @@ class BitstampMarketDataSource extends DataSource {
                       dataTypes: Map[String, DataSource.DataTypeConfig])
                      (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
 
+    val bookRef = Source
+      .actorRef[OrderBookMD[BitstampBookEvent]](Int.MaxValue, OverflowStrategy.fail)
+      .groupBy(1000, _.topic)
+      .to(Sink.foreach(bookMd => {
+        println(bookMd)
+      }))
+      .run
+
     val pusher = new Pusher("de504dc5763aeef9ff52")
 
     pusher.connect(new ConnectionEventListener {
@@ -159,41 +204,9 @@ class BitstampMarketDataSource extends DataSource {
     })
 
     topics.keySet.map(parseProductId).foreach(pair => {
-      val pairStr = formatPair(pair)
-
-      // Subscribe to the live orders channel for this pair
-      val channel = pusher.subscribe(s"live_orders_$pairStr", new ChannelEventListener {
-        override def onSubscriptionSucceeded(channelName: String): Unit = {
-          println(s"Subscribed to $channelName")
-        }
-
-        override def onEvent(channelName: String, eventName: String, data: String): Unit = {
-          println("Channel event", eventName, data)
-        }
-      })
-
-      def bindEvent(event: String): Unit = {
-        channel.bind(event, new SubscriptionEventListener {
-          override def onEvent(channelName: String, eventName: String, data: String): Unit = {
-            val json = parse(data).right.get
-            val event = BitstampBookEvent(
-              eventName,
-              pair.toString,
-              root.event_type.int.getOption(json).get,
-              root.price.double.getOption(json).get,
-              root.datetime.string.getOption(json).get,
-              root.amount.double.getOption(json).get,
-              root.id.long.getOption(json).get,
-              root.microtimestamp.string.getOption(json).get
-            )
-          }
-        })
-      }
-
-      // Bind events
-      bindEvent(CREATED)
-      bindEvent(CHANGED)
-      bindEvent(DELETED)
+      sys.actorOf(Props(
+        new BitstampOrderBookProvider(pair, pusher, bookRef)),
+        s"bitstamp-order-book-provider-$pair")
     })
 
   }
