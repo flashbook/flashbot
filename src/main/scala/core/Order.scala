@@ -3,7 +3,7 @@ package core
 import core.Order._
 
 object Order {
-  trait Side
+  sealed trait Side
   case object Buy extends Side {
     override def toString: String = "buy"
   }
@@ -11,7 +11,7 @@ object Order {
     override def toString: String = "sell"
   }
 
-  object Side extends Side {
+  object Side {
     def parseSide(str: String): Side = str match {
       case "sell" => Sell
       case "buy" => Buy

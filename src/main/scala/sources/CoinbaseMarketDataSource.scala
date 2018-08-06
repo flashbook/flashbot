@@ -67,11 +67,10 @@ class CoinbaseMarketDataSource extends DataSource {
             if (count % snapshotInterval == 0) {
               var itemCount = 1
               val snapshotOrders = md.getSnapshot
-              snapshotOrders.foreach {
-                order =>
-                  snapshotsQueue.enqueue(SnapshotItem(order, md.micros, itemCount,
-                    snapshotOrders.size))
-                  itemCount = itemCount + 1
+              snapshotOrders.foreach { order =>
+                snapshotsQueue.enqueue(SnapshotItem(order, md.micros, itemCount,
+                  snapshotOrders.size))
+                itemCount = itemCount + 1
               }
             }
           }
@@ -96,9 +95,8 @@ class CoinbaseMarketDataSource extends DataSource {
 
     parseBuiltInDataType(dataType) match {
       case Some(x) => (x, timeRange) match {
-
-
         case (FullBook, TimeRange(from, to)) =>
+
           val snapshotQueue =
             timeLog[SnapshotItem](dataDir, parseProductId(topic), "book/snapshots")
 
@@ -110,8 +108,8 @@ class CoinbaseMarketDataSource extends DataSource {
               case (None, SnapshotItem(order, time, index, total))
                 if index == total && time >= from && to > time =>
                 snapOrders = Some(Queue.empty.enqueue(order))
-              case (Some(snapshotOrders), SnapshotItem(order, _, index, total)) if index == 1 =>
-                snapOrders = Some(snapshotOrders.enqueue(order))
+              case (Some(_), SnapshotItem(order, _, index, _)) if index == 1 =>
+                snapOrders = Some(snapOrders.get.enqueue(order))
               case (Some(snapshotOrders), SnapshotItem(order, _, _, _)) =>
                 snapOrders = Some(snapshotOrders.enqueue(order))
               case _ =>
@@ -122,8 +120,7 @@ class CoinbaseMarketDataSource extends DataSource {
             val eventsQueue =
               timeLog[APIOrderEvent](dataDir, parseProductId(topic), "book/events")
             val seq = snapOrders.get.head.seq
-            var state = OrderBookMD[APIOrderEvent](NAME, topic)
-              .addSnapshot(snapOrders.get.head.seq, snapOrders.get)
+            var state = OrderBookMD[APIOrderEvent](NAME, topic).addSnapshot(seq, snapOrders.get)
 
             for (event <- eventsQueue.scan(seq + 1, _.seq, { event =>
               val prevState = state

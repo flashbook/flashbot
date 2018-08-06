@@ -1,5 +1,6 @@
 package core
 
+import core.AggBook.{AggBook, AggBookMD}
 import core.MarketData.{GenMD, HasProduct, Sequenced}
 import core.Order.{Buy, Sell, Side}
 import core.Utils.parseProductId
@@ -14,8 +15,8 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
 
   def processOrderEvent(event: OrderEvent): OrderBook = event match {
     case OrderOpen(orderId, p, price, size, side) => open(orderId, price, size, side)
-    case OrderDone(orderId, p, side, reason, price, remainingSize) => done(orderId)
-    case OrderChange(orderId, p, price, newSize) => change(orderId, newSize)
+    case OrderDone(orderId, _, _, _, _, _) => done(orderId)
+    case OrderChange(orderId, _, _, newSize) => change(orderId, newSize)
     case _ => this
   }
 
@@ -95,6 +96,8 @@ object OrderBook {
       rawEvent = Some(event)
     )
 
+    def toAggBookMD(depth: Int) =
+      AggBookMD(source, topic, micros, AggBook.fromOrderBook(depth)(data))
   }
 
   final case class SnapshotOrder(product: String,
@@ -103,4 +106,6 @@ object OrderBook {
                                  id: String,
                                  price: Double,
                                  size: Double)
+
+
 }

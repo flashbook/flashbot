@@ -1,5 +1,7 @@
 package sources
 
+import java.io.File
+
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
@@ -9,20 +11,27 @@ import akka.stream.scaladsl.{Sink, Source}
 import com.pusher.client.channel.{ChannelEventListener, SubscriptionEventListener}
 import com.pusher.client.connection.{ConnectionEventListener, ConnectionStateChange}
 import com.pusher.client.Pusher
+import core.AggBook.{AggBook, AggBookMD, fromOrderBook}
 import core.Order.{Buy, Sell}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
-import core.{Canceled, DataSource, Filled, MarketData, OrderChange, OrderDone, OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange}
-import core.Utils.parseProductId
+import core.{Canceled, DataSource, Filled, MarketData, OrderChange, OrderDone, OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange, Timestamped, Utils}
+import core.DataSource.{FullBook, parseBuiltInDataType}
+import core.Utils.{initResource, parseProductId}
+import data.TimeLog
 import io.circe.Json
 import io.circe.optics.JsonPath._
 import io.circe.parser._
+import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
 
 import scala.collection.immutable.Queue
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object BitstampMarketDataSource {
+
+  val NAME = "bitstamp"
+
   val CREATED = "order_created"
   val CHANGED = "order_changed"
   val DELETED = "order_deleted"
@@ -81,6 +90,10 @@ object BitstampMarketDataSource {
   class BitstampOrderBookProvider(pair: Pair,
                                   pusher: Pusher,
                                   bookReceiver: ActorRef) extends Actor {
+    implicit val system: ActorSystem = context.system
+    implicit val mat: ActorMaterializer = ActorMaterializer()
+    implicit val ec: ExecutionContext = context.dispatcher
+
     private val pairStr = formatPair(pair)
     private var seenEvent = false
     private var eventQueue = Queue.empty[BitstampBookEvent]
@@ -104,13 +117,12 @@ object BitstampMarketDataSource {
           val event = BitstampBookEvent(
             eventName,
             pair.toString,
-            root.event_type.int.getOption(json).get,
-            root.price.double.getOption(json).get,
+            root.order_type.int.getOption(json).get,
+            root.price.number.getOption(json).get.toDouble,
             root.datetime.string.getOption(json).get,
-            root.amount.double.getOption(json).get,
+            root.amount.number.getOption(json).get.toDouble,
             root.id.long.getOption(json).get,
-            root.microtimestamp.string.getOption(json).get
-          )
+            root.microtimestamp.string.getOption(json).get)
           self ! event
         }
       })
@@ -129,7 +141,7 @@ object BitstampMarketDataSource {
 
         // Flush the queue if a current book state exists.
         if (state.isDefined) {
-          flushEvents()
+          flushEvents(true)
         }
 
         // If it's the first time that we're seeing an event, then request the snapshot.
@@ -137,11 +149,11 @@ object BitstampMarketDataSource {
           seenEvent = true
 
           Future {
-            Thread.sleep(1000)
             Http().singleRequest(HttpRequest(
               uri = s"https://www.bitstamp.net/api/v2/order_book/${formatPair(pair)}?group=2"
             )).flatMap(r => Unmarshal(r.entity).to[BitstampBookSnapshot]) onComplete {
-              case Success(snapshot) => self ! snapshot
+              case Success(snapshot) =>
+                self ! snapshot
               case Failure(err) => throw err
             }
           }
@@ -152,21 +164,26 @@ object BitstampMarketDataSource {
         def mapOrder(isBid: Boolean)(o: Seq[String]) =
           SnapshotOrder(pair.toString, seq, isBid, o(2), o.head.toDouble, o(1).toDouble)
 
-        state = Some(OrderBookMD("bitstamp", pair.toString)
+        state = Some(OrderBookMD(NAME, pair.toString)
           .addSnapshot(seq, snapshot.bids.map(mapOrder(isBid = true)) ++
               snapshot.asks.map(mapOrder(isBid = false))))
-        flushEvents()
+        flushEvents(false)
     }
 
-    def flushEvents(): Unit = {
+    def flushEvents(shouldEmit: Boolean): Unit = {
       while (eventQueue.nonEmpty) {
         eventQueue.dequeue match {
           case (event, queue) =>
             eventQueue = queue
-            // Drop all events that have a lower sequence number than the current state
-            if (event.seq > state.get.seq) {
+            try {
               state = Some(state.get.addEvent(event))
-              bookReceiver ! state.get
+              if (shouldEmit) {
+                bookReceiver ! state.get
+              }
+            } catch {
+              case err: Throwable =>
+                println("No such element", event)
+                err.printStackTrace()
             }
         }
       }
@@ -182,12 +199,27 @@ class BitstampMarketDataSource extends DataSource {
                       dataTypes: Map[String, DataSource.DataTypeConfig])
                      (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
 
+    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
+
     val bookRef = Source
       .actorRef[OrderBookMD[BitstampBookEvent]](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(1000, _.topic)
-      .to(Sink.foreach(bookMd => {
-        println(bookMd)
-      }))
+
+      // Aggregate books to 10 price levels.
+      .map(_.toAggBookMD(10))
+
+      // De-dupe the books after aggregation.
+      .via(Utils.deDupeBy(_.data))
+
+      // Create time logs to write market data to.
+      .via(initResource(md =>
+          timeLog[AggBookMD](dataDir, md.product, md.dataType)))
+
+      .to(Sink.foreach {
+        case (aggBookLog, md) =>
+          aggBookLog.enqueue(md)
+          println("wrote", md)
+      })
       .run
 
     val pusher = new Pusher("de504dc5763aeef9ff52")
@@ -211,8 +243,65 @@ class BitstampMarketDataSource extends DataSource {
 
   }
 
+  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
+    TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
+
+  /**
+    * Additional metadata attached to each SnapshotOrder that helps us read snapshots from the
+    * queue without maintaining a separate index.
+    */
+  case class SnapshotItem(order: SnapshotOrder, micros: Long, index: Int, total: Int)
+    extends Timestamped
+
+
   override def stream(dataDir: String,
                       topic: String,
                       dataType: String,
-                      timeRange: TimeRange): Iterator[MarketData] = ???
+                      timeRange: TimeRange): Iterator[MarketData] = {
+    parseBuiltInDataType(dataType) match {
+      case Some(x) => (x, timeRange) match {
+        case (FullBook, TimeRange(from, to)) =>
+          val snapshotLog =
+            timeLog[SnapshotItem](dataDir, parseProductId(topic), "book/snapshots")
+
+          // Build the snapshot up
+          var snapOrders: Option[Queue[SnapshotOrder]] = None
+          for (item <- snapshotLog
+              .scanBackwards(_.index != 1 || snapOrders.isEmpty)(snapshotLog.close)) {
+            (snapOrders, item) match {
+
+              case (None, SnapshotItem(order, time, index, total))
+                if index == total && time >= from && to > time =>
+                snapOrders = Some(Queue.empty.enqueue(order))
+
+              case (Some(_), SnapshotItem(order, _, index, _)) if index == 1 =>
+                snapOrders = Some(snapOrders.get.enqueue(order))
+
+              case (Some(_), SnapshotItem(order, _, _, _)) =>
+                snapOrders = Some(snapOrders.get.enqueue(order))
+
+              case _ =>
+            }
+          }
+
+          ???
+
+//          if (snapOrders.isDefined) {
+//            val eventsQueue =
+//              timeLog[BitstampBookEvent](dataDir, parseProductId(topic), "book/events")
+//            val seq = snapOrders.get.head.seq
+//            var state = OrderBookMD[BitstampBookEvent](NAME, topic).addSnapshot(seq, snapOrders.get)
+//            for (event <- eventsQueue.scan(seq + 1, _.seq, { event =>
+//              val foundNextEvent = event.seq == state.seq + 1
+//              if (foundNextEvent) {
+////                state = prevState.addEvent(event)
+//              }
+//              foundNextEvent
+//            })) yield state
+//          } else {
+//            List.empty.iterator
+//          }
+      }
+    }
+  }
 }

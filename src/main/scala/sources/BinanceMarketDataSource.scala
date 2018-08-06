@@ -111,7 +111,7 @@ class BinanceMarketDataSource extends DataSource {
       // overlap is OK as long as the "u" field (last update id) of the merged stream keeps
       // increasing because depth update applications are idempotent. So here, we filter out
       // any events that are outdated because they don't push the last update id forward.
-      .via(deDupeStream(_._2.u))
+      .via(deDupeWithSeq(_._2.u))
 
       // Create one book depth provider per product
       .via(initResource(ev =>
@@ -131,7 +131,7 @@ class BinanceMarketDataSource extends DataSource {
       .groupBy(MAX_PRODUCTS, _.product)
 
       // De-dupe trades. Duplicates occur due to WebSocket rotation in the trade provider.
-      .via(deDupeStream(_.data.id.toLong))
+      .via(deDupeWithSeq(_.data.id.toLong))
 
       // Create one TimeLog per product
       .via(initResource(md => timeLog[TradeMD](dataDir, md.product, md.dataType)))
@@ -152,7 +152,7 @@ class BinanceMarketDataSource extends DataSource {
     val tickersStream = Source
       .actorRef[TickerMD](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(MAX_PRODUCTS, _.product)
-      .via(deDupeStream(_.data.micros))
+      .via(deDupeWithSeq(_.data.micros))
       .via(initResource(md => timeLog[TickerMD](dataDir, md.product, md.dataType)))
       .recover {
         case err =>

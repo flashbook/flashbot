@@ -16,6 +16,9 @@ import io.circe.parser._
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.util.matching.Regex
 
+import ai.x.diff.DiffShow
+import ai.x.diff.conversions._
+
 object Utils {
 
   private val formatter = DateTimeFormatter.ISO_DATE_TIME
@@ -51,11 +54,17 @@ object Utils {
       case (Some((resource, _)), ev) => Some(resource, ev)
     }.drop(1).map(_.get)
 
-  def deDupeStream[T](seqFn: T => Long): Flow[T, T, NotUsed] = Flow[T]
-    .scan[(Long, Option[T])]((-1, None)) {
+  def deDupeWithSeq[T](seqFn: T => Long): Flow[T, T, NotUsed] = Flow[T]
+    .scan[(Long, Option[T])](-1, None) {
     case ((seq, _), event) if seqFn(event) > seq => (seqFn(event), Some(event))
     case ((seq, _), _) => (seq, None)
   }.collect { case (_, Some(event)) => event }
+
+  def deDupeVia[T](eqFn: (T, T) => Boolean): Flow[T, T, NotUsed] = Flow[T]
+    .scan[(Option[T], Option[T])](None, None) { case ((_, b), ev) => (b, Some(ev)) }
+    .collect( { case (last, Some(event)) if last.isEmpty || !eqFn(last.get, event)  => event })
+
+  def deDupeBy[T, K](map: T => K): Flow[T, T, NotUsed] = deDupeVia[T]((a, b) => map(a) == map(b))
 
   def withIndex[T]: Flow[T, (Long, T), NotUsed] = Flow[T]
     .scan[(Long, Option[T])]((-1, None))((count, e) => (count._1 + 1, Some(e)))

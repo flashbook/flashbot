@@ -117,4 +117,32 @@ object AggBook {
       case 0 => map - priceLevel
       case _ => map + (priceLevel -> quantity)
     }
+
+  /**
+    * Efficiently convert order book to an AggBook of the specified depth.
+    */
+  def fromOrderBook(depth: Int)(book: OrderBook): AggBook = {
+
+    // Copy asks
+    var askDepths = TreeMap.empty[Double, Double](Ordering.by(a => a))
+    val asksIt = book.asks.iterator
+    var askCount = 0
+    while (asksIt.hasNext && askCount < depth) {
+      val (price, orders) = asksIt.next()
+      askCount = askCount + 1
+      askDepths = askDepths + (price -> orders.map(_.amount).sum)
+    }
+
+    // Copy bids
+    var bidDepths = TreeMap.empty[Double, Double](Ordering.by(a => -a))
+    val bidsIt = book.bids.iterator
+    var bidCount = 0
+    while (bidsIt.hasNext && bidCount < depth) {
+      val (price, orders) = asksIt.next()
+      bidCount = bidCount + 1
+      bidDepths = bidDepths + (price -> orders.map(_.amount).sum)
+    }
+
+    AggBook(depth, asks = askDepths, bids = bidDepths)
+  }
 }
