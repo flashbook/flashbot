@@ -7,10 +7,9 @@ import io.circe._
 import io.circe.{KeyDecoder, KeyEncoder}
 import io.circe.generic.semiauto._
 
-import scala.collection.immutable.TreeMap
+import scala.collection.immutable.{SortedMap, TreeMap}
 
 object AggBook {
-
 
   implicit val doubleKeyEncoder: KeyEncoder[Double] = new KeyEncoder[Double] {
     override def apply(key: Double): String = key.toString
@@ -22,7 +21,7 @@ object AggBook {
 
   case class AggBook(depth: Int,
                      asks: Map[Double, Double] = TreeMap.empty,
-                     bids: Map[Double, Double] = TreeMap.empty) {
+                     bids: Map[Double, Double] = TreeMap.empty(Ordering.by(-_))) {
 
     def updateLevel(side: QuoteSide, priceLevel: Double, quantity: Double): AggBook =
       side match {
@@ -33,16 +32,37 @@ object AggBook {
       }
 
     def convertToTreeMaps: AggBook = copy(
-      asks = toTreeMap(asks),
-      bids = toTreeMap(bids)
+      asks = toTreeMap(asks, reverse = false),
+      bids = toTreeMap(bids, reverse = true)
     )
+
+    def spread: Option[Double] = {
+      if (asks.asInstanceOf[SortedMap[Double, Double]].firstKey > asks.asInstanceOf[SortedMap[Double, Double]].lastKey) {
+        throw new RuntimeException("Asks out of order")
+      }
+      if (bids.asInstanceOf[SortedMap[Double, Double]].firstKey < bids.asInstanceOf[SortedMap[Double, Double]].lastKey) {
+        throw new RuntimeException("Bids out of order")
+      }
+
+      if (asks.isEmpty || bids.isEmpty) None
+      else Some(asks.asInstanceOf[SortedMap[Double, Double]].firstKey -
+        bids.asInstanceOf[SortedMap[Double, Double]].firstKey)
+    }
+
+    def midMarketPrice: Option[Double] = {
+      if (asks.isEmpty || bids.isEmpty) None
+      else Some((asks.asInstanceOf[SortedMap[Double, Double]].firstKey +
+        bids.asInstanceOf[SortedMap[Double, Double]].firstKey) / 2)
+    }
   }
 
   implicit val aggBookDecoder: Decoder[AggBook] = deriveDecoder[AggBook]
   implicit val aggBookEncoder: Encoder[AggBook] = deriveEncoder[AggBook]
 
-  def toTreeMap(map: Map[Double, Double]): TreeMap[Double, Double] =
-    map.foldLeft(TreeMap.empty[Double, Double])(_ + _)
+  def toTreeMap(map: Map[Double, Double], reverse: Boolean): TreeMap[Double, Double] =
+    map.foldLeft(TreeMap.empty[Double, Double](Ordering.by(price =>
+      if (reverse) -price else price
+    )))(_ + _)
 
   def aggFillOrder(book: AggBook, side: Side,
                    sizeOpt: Option[Double], fundsOpt: Option[Double])
@@ -77,7 +97,7 @@ object AggBook {
         }
 
       case (Sell, Some(size), None) =>
-        val ladder = book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.reverseIterator
+        val ladder = book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
         var remainingSize = size
         while (remainingSize > 0) {
           if (!ladder.hasNext) {
@@ -102,9 +122,7 @@ object AggBook {
 
     override def exchange: String = source
 
-    override def price: Double =
-      (data.asks.asInstanceOf[TreeMap[Double, Double]].head._1 +
-        data.bids.asInstanceOf[TreeMap[Double, Double]].last._1) / 2
+    override def price: Double = data.midMarketPrice.get
   }
 
   implicit val aggBookMDDecoder: Decoder[AggBookMD] = deriveDecoder[AggBookMD]
@@ -118,31 +136,9 @@ object AggBook {
       case _ => map + (priceLevel -> quantity)
     }
 
-  /**
-    * Efficiently convert order book to an AggBook of the specified depth.
-    */
   def fromOrderBook(depth: Int)(book: OrderBook): AggBook = {
-
-    // Copy asks
-    var askDepths = TreeMap.empty[Double, Double](Ordering.by(a => a))
-    val asksIt = book.asks.iterator
-    var askCount = 0
-    while (asksIt.hasNext && askCount < depth) {
-      val (price, orders) = asksIt.next()
-      askCount = askCount + 1
-      askDepths = askDepths + (price -> orders.map(_.amount).sum)
-    }
-
-    // Copy bids
-    var bidDepths = TreeMap.empty[Double, Double](Ordering.by(a => -a))
-    val bidsIt = book.bids.iterator
-    var bidCount = 0
-    while (bidsIt.hasNext && bidCount < depth) {
-      val (price, orders) = asksIt.next()
-      bidCount = bidCount + 1
-      bidDepths = bidDepths + (price -> orders.map(_.amount).sum)
-    }
-
-    AggBook(depth, asks = askDepths, bids = bidDepths)
+    AggBook(depth,
+      asks = book.asks.take(depth).mapValues(_.map(_.amount).sum),
+      bids = book.bids.take(depth).mapValues(_.map(_.amount).sum))
   }
 }

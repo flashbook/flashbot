@@ -116,6 +116,7 @@ object TradingSession {
 
       var dataSources = Map.empty[String, DataSource]
       def loadDataSource(srcKey: String): DataSource = {
+
         // If it is already loaded, do nothing.
         if (dataSources.contains(srcKey)) {
           return dataSources(srcKey)

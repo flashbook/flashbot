@@ -40,12 +40,14 @@ final case class OrderMatch(tradeId: Long,
                             price: Double,
                             side: Side,
                             makerOrderId: String,
-                            orderId: String) extends OrderEvent
+                            orderId: String) extends OrderEvent {
+}
 
 final case class OrderReceived(orderId: String,
                                product: Pair,
                                clientOid: Option[String],
-                               `type`: OrderType) extends OrderEvent
+                               `type`: OrderType) extends OrderEvent {
+}
 
 
 sealed trait DoneReason

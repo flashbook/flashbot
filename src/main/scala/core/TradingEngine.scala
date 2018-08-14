@@ -70,6 +70,7 @@ class TradingEngine(dataDir: String,
           val (ref, fut) = Source
             .actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
             .toMat(Sink.foreach { event =>
+              println("Processing bot session event")
               self ! ProcessBotSessionEvent(name, event)
             })(Keep.both)
             .run
@@ -81,6 +82,7 @@ class TradingEngine(dataDir: String,
               log.error(err, s"Bot $name failed")
           }
 
+          println("sending StartTradingSession")
           self ! StartTradingSession(
             Some(name),
             strategy,
@@ -123,12 +125,19 @@ class TradingEngine(dataDir: String,
       // that the session was started, so we don't wait for too long. 1 second should do it.
       try {
         implicit val timeout: Timeout = Timeout(10 seconds)
-        Await.result(sessionActor ? "start", timeout.duration) match {
-          case (sessionId: String, micros: Long) =>
-            Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
-              mode, micros, initialBalances, report) :: Nil)
-          case err: EngineError =>
-            Left(err)
+        try {
+          Await.result(sessionActor ? "start", timeout.duration) match {
+            case (sessionId: String, micros: Long) =>
+              Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
+                mode, micros, initialBalances, report) :: Nil)
+            case err: EngineError =>
+              println("error on left", err)
+              Left(err)
+          }
+        } catch {
+          case err: Throwable =>
+            println("ERRRRRRRRROR", err)
+            throw err
         }
       } catch {
         case err: TimeoutException =>
@@ -165,6 +174,10 @@ class TradingEngine(dataDir: String,
     * doesn't grow out of bounds.
     */
   override def receiveCommand: Receive = {
+
+    case err: EngineError =>
+      log.error(err, "Uncaught EngineError")
+
     case SaveSnapshotSuccess(SnapshotMetadata(_, seqNr, _)) =>
       log.info("Snapshot saved: {}", seqNr)
       deleteSnapshots(SnapshotSelectionCriteria(maxSequenceNr = seqNr - 1))
@@ -249,6 +262,7 @@ class TradingEngine(dataDir: String,
     case cmd: Command =>
       processCommand(cmd) match {
         case Left(err) =>
+          println("SENDING BACK ERROR", cmd, err, sender)
           sender ! err
         case Right(events) =>
           persistAll(events) { e =>

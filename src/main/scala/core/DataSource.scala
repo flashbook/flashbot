@@ -7,8 +7,9 @@ import io.circe.Json
 abstract class DataSource {
 
   def index(implicit sys: ActorSystem,
-            mat: ActorMaterializer): Set[String] =
+            mat: ActorMaterializer): Set[String] = {
     throw new NotImplementedError
+  }
 
   def ingest(dataDir: String,
              topics: Map[String, Json],

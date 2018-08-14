@@ -75,7 +75,9 @@ lazy val timeSeriesDeps = List(
 lazy val miscDeps = List(
   // Reflection utility for discovering classes that implement an interface.
   "org.clapper" %% "classutil" % "1.1.2",
-  "ai.x" %% "diff" % "1.2.0"
+  "ai.x" %% "diff" % "1.2.0",
+  "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
+  "com.lihaoyi" %% "fansi" % "0.2.5"
 )
 
 lazy val root = project.in(file("."))

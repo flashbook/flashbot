@@ -9,7 +9,7 @@ import scala.collection.immutable.TreeMap
 
 case class OrderBook(orders: Map[String, Order] = Map.empty,
                      asks: TreeMap[Double, Set[Order]] = TreeMap.empty,
-                     bids: TreeMap[Double, Set[Order]] = TreeMap.empty) {
+                     bids: TreeMap[Double, Set[Order]] = TreeMap.empty(Ordering.by(-_))) {
 
   def isInitialized: Boolean = orders.nonEmpty
 
@@ -53,6 +53,19 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
         orders = orders + (id -> o.copy(amount = newSize)),
         bids = bids + (price -> (bids(price) - o + o.copy(amount = newSize))))
     }
+  }
+
+
+  def spread: Option[Double] = {
+    if (asks.nonEmpty && bids.nonEmpty) {
+      if (asks.firstKey > asks.lastKey) {
+        throw new RuntimeException("Asks out of order")
+      }
+      if (bids.firstKey < bids.lastKey) {
+        throw new RuntimeException("Bids out of order")
+      }
+      Some(asks.firstKey - bids.firstKey)
+    } else None
   }
 
   private def addToIndex(idx: TreeMap[Double, Set[Order]], o: Order): TreeMap[Double, Set[Order]] =

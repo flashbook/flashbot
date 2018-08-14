@@ -16,6 +16,10 @@
     "cryptopia": {
       "class": "exchanges.Cryptopia",
       "params": {}
+    },
+    "bitstamp": {
+      "class": "exchanges.Bitstamp",
+      "params": {}
     }
   },
 
@@ -487,7 +491,8 @@
     "twitter_vol": "strategies.TwitterVolumeTrader",
     "random": "strategies.OrderRandomly",
     "secret_a": "strategies.SecretA",
-    "secret_b": "strategies.SecretB"
+    "secret_b": "strategies.SecretB",
+    "secret_c": "strategies.SecretC"
   },
 
   "currencies": {
