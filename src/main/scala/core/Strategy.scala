@@ -14,6 +14,7 @@ import core.TradingSession.{OrderTarget, SessionReportEvent}
   * possibly written in other languages.
   */
 abstract class Strategy {
+
   /**
     * Human readable title for display purposes.
     */
@@ -40,16 +41,23 @@ abstract class Strategy {
     */
   def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {}
 
-  def orderTargetRatio(exchangeName: String, product: String, target: Double)
+  def orderTargetRatio(exchangeName: String,
+                       product: String,
+                       ratio: Double)
                       (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(exchangeName, target, parseProductId(product), None))
+    ctx.handleEvents(OrderTarget(exchangeName, ratio, parseProductId(product), None))
   }
 
-  def orderTargetRatio(target: Double, price: Double, name: String = "limit")
+  def orderTargetRatio(exchangeName: String,
+                       product: String,
+                       ratio: Double,
+                       price: Double,
+                       name: String)
                       (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(exchangeName, ratio, parseProductId(product), Some(name, price)))
   }
 
-  def metric(name: String, value: Double, micros: Long)
+  def record(name: String, value: Double, micros: Long)
             (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(SessionReportEvent(TimeSeriesEvent(name, value, micros)))
   }

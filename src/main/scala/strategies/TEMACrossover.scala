@@ -54,7 +54,7 @@ class TEMACrossover extends Strategy {
       }
 
       // Send indicators to report
-      metric("long_tema", longTEMA.getValue(i).doubleValue(), data.micros)
-      metric("short_tema", shortTEMA.getValue(i).doubleValue(), data.micros)
+      record("long_tema", longTEMA.getValue(i).doubleValue(), data.micros)
+      record("short_tema", shortTEMA.getValue(i).doubleValue(), data.micros)
   }
 }

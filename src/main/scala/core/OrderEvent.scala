@@ -1,9 +1,9 @@
 package core
 
-import core.MarketData.{Sequenced}
+import core.MarketData.Sequenced
 import core.Order.{Limit, OrderType, Side}
 
-sealed trait OrderEvent extends StrategyEvent {
+sealed trait OrderEvent {
   val orderId: String
   val product: Pair
 }

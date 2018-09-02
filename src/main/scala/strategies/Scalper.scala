@@ -74,7 +74,7 @@ class Scalper extends Strategy {
       }
 
       // Send indicators to report
-      metric("short_ema", short, data.micros)
-      metric("long_ema", long, data.micros)
+      record("short_ema", short, data.micros)
+      record("long_ema", long, data.micros)
   }
 }

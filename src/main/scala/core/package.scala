@@ -34,6 +34,18 @@ package object core {
     override def price: Double = data.price
   }
 
+  case class Quote(bidPrice: Double,
+                   bidAmount: Double,
+                   askPrice: Double,
+                   askAmount: Double) {
+    def reverse: Quote = Quote(
+      bidPrice = askPrice,
+      bidAmount = askAmount,
+      askPrice = bidPrice,
+      askAmount = bidAmount
+    )
+  }
+
   case class Ticker(micros: Long,
                     bestBidPrice: Double,
                     bestBidQuantity: Double,
@@ -87,5 +99,6 @@ package object core {
 
   case class Tick(exchange: String)
 
-  trait StrategyEvent
+  sealed trait StrategyEvent
+  case class StrategyOrderEvent(targetId: String, event: OrderEvent) extends StrategyEvent
 }

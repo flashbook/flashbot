@@ -18,6 +18,7 @@ import exchanges.Simulator
 import io.circe.Json
 
 import scala.collection.immutable.Queue
+import scala.concurrent.forkjoin.ForkJoinPool
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -73,7 +74,8 @@ object TradingSession {
                      sessionEventsRef: ActorRef,
                      initialBalances: Map[Account, Double]) extends Actor with ActorLogging {
 
-    implicit val ec: ExecutionContext = context.dispatcher
+    implicit val ec: ExecutionContext =
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
     implicit val system: ActorSystem = context.system
     implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
@@ -246,8 +248,6 @@ object TradingSession {
           strategy, sessionId, sessionMicros) =>
         var currentStrategySeqNr: Option[Long] = None
 
-        println("running session")
-
         /**
           * The trading session that we fold market data over. We pass the running session instance
           * to the strategy every time we call `handleData`.
@@ -315,11 +315,9 @@ object TradingSession {
 
         val iteratorExecutor: ExecutionContext =
           ExecutionContext.fromExecutor(
-            Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
-
-        println("size:", dataSourceAddresses.size)
-
-        var count = 0
+            Executors.newFixedThreadPool(100))
+//          ExecutionContext.fromExecutor(
+//            Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
 
         // Merge market data streams from the data sources we just loaded and stream the data into
         // the strategy instance. If this trading session is a backtest then we merge the data
@@ -329,10 +327,7 @@ object TradingSession {
           .groupBy(_.srcKey)
           .flatMap { case (key, addresses) =>
             addresses.map {
-              case a @ Address(_, topic, dataType) =>
-
-                count += 1
-                println("doing address", count, a)
+              case Address(_, topic, dataType) =>
 
                 val it = dataSources(key).stream(dataDir, topic, dataType, mode match {
                   case Backtest(range) => range
@@ -343,9 +338,12 @@ object TradingSession {
                   Future {
                     if (memo.hasNext) {
                       Some(memo, memo.next)
-                    } else None
+                    } else {
+                      println("No next")
+                      None
+                    }
                   } (iteratorExecutor)
-                }
+                }.
             }
           }
           .reduce[Source[MarketData, NotUsed]](mode match {
@@ -375,7 +373,9 @@ object TradingSession {
             val (fills, userData) = exchanges(ex).collect(session, data)
 
             // The user data is relayed to the strategy as StrategyEvents
-            userData.foreach(strategy.handleEvent)
+            userData
+              .map(event => StrategyOrderEvent(ids(ex).actualToTarget(event.orderId), event))
+              .foreach(strategy.handleEvent)
 
             // Use a sequence number to enforce the rule that Session.handleEvents is only
             // allowed to be called in the current call stack. Send market data to strategy,
@@ -571,12 +571,19 @@ object TradingSession {
         // Allows exchanges to send ticks, so that we can react instantly to exchange events.
         tickRefOpt = Some(tickRef)
 
-        fut.onComplete {
+        var fut2 = for (done <- fut) yield {
+          println("YOOOOOOOOOO FUT2")
+          done
+        }
+
+        fut2.onComplete {
           case Success(_) =>
+            println("YOOOO")
             log.info("session success")
             sessionEventsRef ! PoisonPill
           case Failure(err) =>
-            log.error(err, "session failure")
+            println("YOOOO HELLLOOOO")
+            log.error(err, "session failed")
             sessionEventsRef ! PoisonPill
         }
 

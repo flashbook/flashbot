@@ -455,7 +455,10 @@
         "bch_btc": {}
       },
       "data_types": {
-        "book": {
+        "book_10": {
+          "retention": "90d"
+        },
+        "trades": {
           "retention": "90d"
         }
       }
@@ -492,7 +495,8 @@
     "random": "strategies.OrderRandomly",
     "secret_a": "strategies.SecretA",
     "secret_b": "strategies.SecretB",
-    "secret_c": "strategies.SecretC"
+    "secret_c": "strategies.SecretC",
+    "secret_d": "strategies.SecretD"
   },
 
   "currencies": {

@@ -53,8 +53,8 @@ class DualMovingAverageCrossover extends Strategy {
         }
 
         // Send indicators to report
-        metric("short_ema", shortEMA.getValue(i).doubleValue(), data.micros)
-        metric("long_ema", longEMA.getValue(i).doubleValue(), data.micros)
+        record("short_ema", shortEMA.getValue(i).doubleValue(), data.micros)
+        record("long_ema", longEMA.getValue(i).doubleValue(), data.micros)
     }
   }
 }
