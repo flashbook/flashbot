@@ -336,14 +336,17 @@ object TradingSession {
 
                 Source.unfoldAsync[Iterator[MarketData], MarketData](it) { memo =>
                   Future {
+                    println("try")
+
                     if (memo.hasNext) {
+                      println("has next")
                       Some(memo, memo.next)
                     } else {
                       println("No next")
                       None
                     }
                   } (iteratorExecutor)
-                }.
+                }
             }
           }
           .reduce[Source[MarketData, NotUsed]](mode match {
@@ -571,12 +574,7 @@ object TradingSession {
         // Allows exchanges to send ticks, so that we can react instantly to exchange events.
         tickRefOpt = Some(tickRef)
 
-        var fut2 = for (done <- fut) yield {
-          println("YOOOOOOOOOO FUT2")
-          done
-        }
-
-        fut2.onComplete {
+        fut.onComplete {
           case Success(_) =>
             println("YOOOO")
             log.info("session success")
