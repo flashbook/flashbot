@@ -4,6 +4,8 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import io.circe.Json
 
+import scala.concurrent.duration.FiniteDuration
+
 abstract class DataSource {
 
   def index(implicit sys: ActorSystem,
@@ -44,10 +46,12 @@ object DataSource {
   case class DepthBook(depth: Int) extends BuiltInType
   case object Trades extends BuiltInType
   case object Tickers extends BuiltInType
+  case class Candles(duration: FiniteDuration) extends BuiltInType
 
   def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
     case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
+    case "candles" :: d :: Nil => Some(Candles(Utils.parseDuration(d)))
     case "trades" :: Nil => Some(Trades)
     case "tickers" :: Nil => Some(Tickers)
     case _ => None

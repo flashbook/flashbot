@@ -2,8 +2,8 @@ package core
 
 import io.circe.Json
 import core.Utils.parseProductId
-import core.DataSource.DataSourceConfig
-import core.Report.TimeSeriesEvent
+import core.DataSource.{Address, DataSourceConfig}
+import core.Report.{TimeSeriesCandle, TimeSeriesEvent}
 import core.TradingSession.{OrderTarget, SessionReportEvent}
 
 /**
@@ -61,6 +61,13 @@ abstract class Strategy {
             (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(SessionReportEvent(TimeSeriesEvent(name, value, micros)))
   }
+
+  def record(name: String, candle: Candle)
+            (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SessionReportEvent(TimeSeriesCandle(name, candle)))
+  }
+
+  def resolveAddress(address: Address): Option[Iterator[MarketData]] = None
 }
 
 object Strategy {

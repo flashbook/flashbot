@@ -40,6 +40,25 @@ class TimeSeriesGroup(period: Duration) {
     allSeries = allSeries + (key -> series)
   }
 
+  def record(exchange: String,
+             product: Pair,
+             candle: Candle): Unit = {
+    val key = _key(exchange, product)
+    val series =
+      if (allSeries.isDefinedAt(key)) allSeries(key)
+      else new BaseTimeSeries.SeriesBuilder().withName(key).build()
+
+    val zdt = ZonedDateTime.ofInstant(Instant.ofEpochMilli(candle.micros / 1000), ZoneOffset.UTC)
+
+    if (candle.volume.isDefined) {
+      series.addBar(zdt, candle.open, candle.high, candle.low, candle.close, candle.volume.get)
+    } else {
+      series.addBar(zdt, candle.open, candle.high, candle.low, candle.close)
+    }
+
+    allSeries = allSeries + (key -> series)
+  }
+
   def get(exchange: String, product: Pair): Option[TimeSeries] =
     allSeries.get(_key(exchange, product))
 

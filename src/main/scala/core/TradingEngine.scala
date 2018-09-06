@@ -249,7 +249,7 @@ class TradingEngine(dataDir: String,
               events.foreach(println)
           }
 
-          fut pipeTo sender
+          fut.map(ReportResponse) pipeTo sender
         } catch {
           case err: Throwable =>
             log.error("Uncaught error during backtesting", err)

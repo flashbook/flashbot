@@ -4,7 +4,7 @@ import java.io.File
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.HttpRequest
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Sink, Source}
@@ -211,6 +211,7 @@ object BitstampMarketDataSource {
 
     channel.bind("trade", new SubscriptionEventListener {
       override def onEvent(channelName: String, eventName: String, data: String): Unit = {
+        println(data)
         val json = parse(data).right.get
         self ! TradeMD(NAME, pair.toString, Trade(
           root.id.long.getOption(json).get.toString,
@@ -224,8 +225,11 @@ object BitstampMarketDataSource {
     def requestBackfill(): Unit = {
       Future {
         Http().singleRequest(HttpRequest(
+          method = HttpMethods.GET,
           uri = s"https://www.bitstamp.net/api/v2/transactions/${formatPair(pair)}/?time=day"
-        )).flatMap(r => Unmarshal(r.entity).to[Seq[BitstampTX]]) onComplete {
+        )).flatMap(r => {
+          Unmarshal(r.entity).to[Seq[BitstampTX]]
+        }) onComplete {
           case Success(backfill) =>
             self ! backfill
           case Failure(err) =>

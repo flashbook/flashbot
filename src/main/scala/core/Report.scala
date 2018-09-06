@@ -1,6 +1,7 @@
 package core
 
 import core.Report._
+import core.Candle
 import io.circe.Json
 
 import scala.concurrent.duration._
@@ -54,7 +55,7 @@ case class Report(strategy: String,
                                                    valueFn: T => Double): ReportDelta = {
     val value = valueFn(event)
     val newBarMicros = (event.micros / barSize.toMicros) * barSize.toMicros
-    val currentTS = timeSeries.getOrElse(series, Vector.empty)
+    val currentTS: Seq[Candle] = timeSeries.getOrElse(series, Vector.empty)
     if (currentTS.lastOption.exists(_.micros == newBarMicros))
       CandleUpdate(series, currentTS.last.add(value))
     else
@@ -80,14 +81,14 @@ object Report {
   case class CandleUpdate(series: String, candle: Candle) extends CandleEvent
   case class CandleAdd(series: String, candle: Candle) extends CandleEvent
 
-  case class Candle(micros: Long, open: Double, high: Double, low: Double, close: Double)
-      extends Timestamped {
-    def add(value: Double): Candle = copy(
-      high = math.max(high, value),
-      low = math.min(low, value),
-      close = value
-    )
-  }
+//  case class Candle(micros: Long, open: Double, high: Double, low: Double, close: Double)
+//      extends Timestamped {
+//    def add(value: Double): Candle = copy(
+//      high = math.max(high, value),
+//      low = math.min(low, value),
+//      close = value
+//    )
+//  }
 
   /**
     * These are events that are emitted by the session, to be sent to the report.
@@ -108,6 +109,11 @@ object Report {
                           micros: Long) extends ReportEvent with Timestamped
   case class TimeSeriesEvent(key: String, value: Double, micros: Long)
     extends ReportEvent with Timestamped
+  case class TimeSeriesCandle(key: String, candle: Candle)
+    extends ReportEvent with Timestamped {
+    override def micros: Long = candle.micros
+  }
+
   case class CollectionEvent(name: String, item: Json) extends ReportEvent
 
 

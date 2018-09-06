@@ -19,7 +19,7 @@ import io.circe.Json
 
 import scala.collection.immutable.Queue
 import scala.concurrent.forkjoin.ForkJoinPool
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 object TradingSession {
@@ -74,8 +74,9 @@ object TradingSession {
                      sessionEventsRef: ActorRef,
                      initialBalances: Map[Account, Double]) extends Actor with ActorLogging {
 
-    implicit val ec: ExecutionContext =
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
+//    implicit val ec: ExecutionContext =
+//      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
+    implicit val ec: ExecutionContext = ExecutionContext.global
     implicit val system: ActorSystem = context.system
     implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
@@ -315,9 +316,7 @@ object TradingSession {
 
         val iteratorExecutor: ExecutionContext =
           ExecutionContext.fromExecutor(
-            Executors.newFixedThreadPool(100))
-//          ExecutionContext.fromExecutor(
-//            Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
+            Executors.newFixedThreadPool(dataSourceAddresses.size + 5))
 
         // Merge market data streams from the data sources we just loaded and stream the data into
         // the strategy instance. If this trading session is a backtest then we merge the data
@@ -326,33 +325,39 @@ object TradingSession {
         val (tickRef, fut) = dataSourceAddresses
           .groupBy(_.srcKey)
           .flatMap { case (key, addresses) =>
-            addresses.map {
-              case Address(_, topic, dataType) =>
-
-                val it = dataSources(key).stream(dataDir, topic, dataType, mode match {
+            addresses.map { addr =>
+              val resolved = strategy.resolveAddress(addr)
+              val it =
+                if (resolved.isDefined) resolved.get
+                else dataSources(key).stream(dataDir, addr.topic, addr.dataType, mode match {
                   case Backtest(range) => range
                   case _ => TimeRange(sessionMicros)
                 })
 
-                Source.unfoldAsync[Iterator[MarketData], MarketData](it) { memo =>
-                  Future {
-                    println("try")
-
-                    if (memo.hasNext) {
-                      println("has next")
-                      Some(memo, memo.next)
-                    } else {
-                      println("No next")
-                      None
-                    }
-                  } (iteratorExecutor)
-                }
+              Source.unfoldAsync[Iterator[MarketData], MarketData](it) { memo =>
+                Future {
+                  if (memo.hasNext) {
+                    Some(memo, memo.next)
+                  } else {
+                    None
+                  }
+                } (iteratorExecutor)
+              }
             }
           }
           .reduce[Source[MarketData, NotUsed]](mode match {
             case Backtest(range) => _.mergeSorted(_)
             case _ => _.merge(_)
           })
+
+          // Watch for termination of the merged data source stream and then manually close
+          // the tick stream.
+          .watchTermination()(Keep.right)
+          .mapMaterializedValue(_.onComplete(res => {
+            tickRefOpt.get ! PoisonPill
+            res
+          }))
+
           .mergeMat(Source.actorRef[Tick](Int.MaxValue, OverflowStrategy.fail))(Keep.right)
             .map[Either[MarketData, Tick]] {
             case md: MarketData => Left(md)
