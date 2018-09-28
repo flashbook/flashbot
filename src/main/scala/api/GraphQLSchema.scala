@@ -1,6 +1,6 @@
 package api
 
-import core.Report.{Candle, TradeEvent}
+import core.Report.TradeEvent
 import core._
 import core.TradingEngine._
 import core.Utils.printJson

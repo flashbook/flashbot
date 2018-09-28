@@ -1,4 +1,5 @@
 import core.MarketData.GenMD
+import core.Order.{Buy, Sell, Side}
 import core.Utils.parseProductId
 import io.circe.Json
 import io.circe.generic.auto._
@@ -125,4 +126,35 @@ package object core {
 
   sealed trait StrategyEvent
   case class StrategyOrderEvent(targetId: String, event: OrderEvent) extends StrategyEvent
+
+  sealed trait Size
+  sealed trait FixedSize extends Size {
+    // Size can't be zero
+    def size: Double
+    def side: Side = size match {
+      case s if s < 0 => Sell
+      case s if s > 0 => Buy
+    }
+    def amount: Option[Double]
+    def funds: Option[Double]
+  }
+
+  case class Amount(size: Double) extends FixedSize {
+    override def amount: Option[Double] = Some(size.abs)
+    override def funds: Option[Double] = None
+  }
+  case class Funds(size: Double) extends FixedSize {
+    override def amount: Option[Double] = None
+    override def funds: Option[Double] = Some(size.abs)
+  }
+
+  case class Ratio(ratio: Double, scope: Scope) extends Size
+
+
+  sealed trait Scope
+  case object Portfolio extends Scope
+  case object PairScope extends Scope
+  case class Basket(coins: Set[String]) extends Scope
+
+  final case class TargetID(pair: Pair, key: String)
 }

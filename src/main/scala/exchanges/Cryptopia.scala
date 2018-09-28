@@ -19,5 +19,5 @@ class Cryptopia(params: Json)(implicit val system: ActorSystem,
 
   override def quoteAssetPrecision(pair: core.Pair): Int = ???
 
-  override def lotSize(pair: core.Pair): Double = ???
+  override def lotSize(pair: core.Pair): Option[Double] = ???
 }

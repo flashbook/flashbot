@@ -80,6 +80,10 @@ lazy val miscDeps = List(
   "com.lihaoyi" %% "fansi" % "0.2.5"
 )
 
+lazy val statsDeps = List(
+  "org.la4j" % "la4j" % "0.6.0"
+)
+
 lazy val root = project.in(file("."))
   .settings(sharedSettings: _*)
   .settings(assemblyJarName in assembly := "flashbot.jar")
@@ -92,7 +96,7 @@ lazy val root = project.in(file("."))
     }
   }))
   .settings(libraryDependencies ++= (serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLDeps ++
-    dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps))
+    dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps ++ statsDeps))
 
 
 // Hack to stop SBT from complaining

@@ -12,7 +12,7 @@ import scala.collection.immutable.Queue
   * real exchange as a parameter to use as a base implementation, but it simulates all API
   * interactions so that no network requests are actually made.
   */
-class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
+class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
 
   private var currentTimeMicros: Long = 0
 
@@ -37,13 +37,12 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
     var fills = Seq.empty[Order.Fill]
     var events = Seq.empty[OrderEvent]
 
-    // Update the current time
-    if (data.get.micros > currentTimeMicros) {
-      currentTimeMicros = data.get.micros
-    }
+    // Update the current time, based on the time of the incoming market data.
+    currentTimeMicros = math.max(data.map(_.micros).getOrElse(0L), currentTimeMicros)
 
     // Dequeue and process API requests that have passed the latency threshold
-    while (apiRequestQueue.headOption.exists(_.requestTime + latencyMicros < currentTimeMicros)) {
+    while (apiRequestQueue.headOption
+        .exists(_.requestTime + latencyMicros <= currentTimeMicros)) {
       apiRequestQueue.dequeue match {
         case (r: APIRequest, rest) =>
           val evTime = r.requestTime + latencyMicros
@@ -133,5 +132,5 @@ class Simulator(base: Exchange, latencyMicros: Long) extends Exchange {
 
   override def useFundsForMarketBuys: Boolean = base.useFundsForMarketBuys
 
-  override def lotSize(pair: Pair): Double = base.lotSize(pair)
+  override def lotSize(pair: Pair): Option[Double] = base.lotSize(pair)
 }

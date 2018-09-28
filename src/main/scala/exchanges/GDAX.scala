@@ -16,5 +16,5 @@ class GDAX extends Exchange {
 
   override def useFundsForMarketBuys: Boolean = true
 
-  override def lotSize(pair: Pair): Double = ???
+  override def lotSize(pair: Pair): Option[Double] = ???
 }

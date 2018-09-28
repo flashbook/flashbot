@@ -23,13 +23,17 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 object TradingSession {
+
   trait Event
   case class LogMessage(message: String) extends Event
-  case class OrderTarget(exchangeName: String, ratio: Double, pair: Pair,
+  case class OrderTarget(exchangeName: String,
+                         size: Size,
+                         pair: Pair,
                          price: Option[(String, Double)]) extends Event {
     def id: String = (exchangeName :: pair ::
       price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
   }
+  case class SetHedge(coin: String, position: Long) extends Event
   case class SessionReportEvent(event: ReportEvent) extends Event
 
   def exchangeNameForTargetId(id: String): String = id.split(":").head
@@ -53,7 +57,8 @@ object TradingSession {
                                  startedAt: Long,
                                  balances: Map[Account, Double],
                                  report: Report) {
-    def updateReport(delta: ReportDelta): TradingSessionState = copy(report = report.update(delta))
+    def updateReport(delta: ReportDelta): TradingSessionState =
+      copy(report = report.update(delta))
   }
 
   case class SessionSetup(markets: Map[String, Set[Pair]],
@@ -81,8 +86,6 @@ object TradingSession {
     implicit val mat: ActorMaterializer = Utils.buildMaterializer
 
     val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
-    val defaultLatencyMicros: Long = 10 * 1000
-
     var tickRefOpt: Option[ActorRef] = None
 
     def setup(): Either[EngineError, SessionSetup] = {
@@ -157,19 +160,33 @@ object TradingSession {
       // Initialize the strategy and collect the data source addresses it returns
       var dataSourceAddresses = Seq.empty[Address]
       try {
-        val expandedDataSourceConfigs = dataSourceConfigs.map {
-          case (k, c) => (k, c.copy(topics = c.topics.flatMap {
-            case ("*", value: Json) => loadDataSource(k).index.toSeq.map((_, value))
-            case kv: (String, Json) => Seq(kv)
-          }))
-        }
+        println("** 1")
+        // TODO: Should we hide data source config expansion behind a flag?
+        // Or be smart about it some other way?
+
+//        val expandedDataSourceConfigs = dataSourceConfigs.map {
+//          case (k, c) => (k, c.copy(topics = c.topics.flatMap {
+//            case ("*", value: Json) =>
+//              val foo  = loadDataSource(k)
+//              println("** 2", k, foo)
+//              val res = foo.index.toSeq.map((_, value))
+//              println("** 2 res", res)
+//              res
+//            case kv: (String, Json) =>
+//              println("** 3")
+//              Seq(kv)
+//          }))
+//        }
+        println("** 4")
         dataSourceAddresses = strategyOpt.get
-          .initialize(strategyParams, expandedDataSourceConfigs, initialBalances)
+          .initialize(strategyParams, dataSourceConfigs, initialBalances)
           .map(DataSource.parseAddress)
       } catch {
         case err: EngineError =>
           return Left(err)
         case err: Throwable =>
+          println("CAUSE", err.getMessage)
+//          err.getCause.printStackTrace()
           return Left(EngineError(s"Strategy initialization error: $strategyKey", err))
       }
 
@@ -216,7 +233,7 @@ object TradingSession {
             })
             exchanges = exchanges + (srcKey -> (
               if (mode == Live) instance
-              else new Simulator(instance, defaultLatencyMicros)))
+              else new Simulator(instance)))
           } catch {
             case err: Throwable =>
               return Left(EngineError(s"Exchange instantiation error: $srcKey", err))
@@ -257,7 +274,7 @@ object TradingSession {
                            balances: Map[Account, Double] = initialBalances,
                            prices: Map[Market, Double] = Map.empty,
                            orderManagers: Map[String, OrderManager] =
-                           markets.mapValues(_ => OrderManager()),
+                              markets.mapValues(_ => OrderManager()),
 
                            // Create action queue for every exchange
                            actionQueues: Map[String, ActionQueue] = markets
@@ -277,6 +294,8 @@ object TradingSession {
           private var targets = Queue.empty[OrderTarget]
           private var reportEvents = Queue.empty[ReportEvent]
 
+          var hedges = Map.empty[String, Double]
+
           def handleEvent(event: TradingSession.Event): Unit = {
             currentStrategySeqNr match {
               case Some(seq) if seq == seqNr =>
@@ -289,9 +308,15 @@ object TradingSession {
                     // to prevent naming conflicts.
                     reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
 
+                  case SessionReportEvent(event: TimeSeriesCandle) =>
+                    reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
+
                   case msg: LogMessage =>
                     // TODO: This should save to a time log, not log to stdout...
                     log.info(msg.message)
+
+                  case h: SetHedge =>
+                    hedges += (h.coin -> h.position)
                 }
 
               case _ =>
@@ -380,35 +405,56 @@ object TradingSession {
             // TODO: This doesn't support non-exchange data sources yet
             val (fills, userData) = exchanges(ex).collect(session, data)
 
-            // The user data is relayed to the strategy as StrategyEvents
-            userData
-              .map(event => StrategyOrderEvent(ids(ex).actualToTarget(event.orderId), event))
-              .foreach(strategy.handleEvent)
-
-            // Use a sequence number to enforce the rule that Session.handleEvents is only
-            // allowed to be called in the current call stack. Send market data to strategy,
-            // then lock the handleEvent method again.
-            data match {
-              case Some(md) =>
-                currentStrategySeqNr = Some(session.seqNr)
-                strategy.handleData(md)(session)
-                currentStrategySeqNr = None
-              case None =>
-            }
-
-            // These should be empty if `handleData` wasn't called.
-            val targets = session.collectTargets
-            var newReportEvents = session.collectReportEvents
-
             var newIds = ids
             var newActions = actions
-            var newBalances = balances
-            var newPrices = prices
-            var newOMs = oms
 
-            def emitReportEvent(e: ReportEvent): Unit = {
-              newReportEvents = newReportEvents :+ e
+            userData.foldLeft((newIds, newActions)) {
+              /**
+                * Either market or limit order received by the exchange. Associate the client id
+                * with the exchange id. Do not close any actions yet. Wait until the order is
+                * open, in the case of limit order, or done if it's a market order.
+                */
+              case ((is, as), o @ OrderReceived(id, _, clientId, _)) =>
+//                println("order received", id, clientId)
+                strategy.handleEvent(StrategyOrderEvent(is(ex).clientToTarget(clientId.get), o))
+                (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
+
+              /**
+                * Limit order is opened on the exchange. Close the action that submitted it.
+                */
+              case ((is, as), o @ OrderOpen(id, _, _, _, _)) =>
+//                println("order open", id)
+                strategy.handleEvent(StrategyOrderEvent(is(ex).actualToTarget(id), o))
+                (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
+
+              /**
+                * Either market or limit order is done. Could be due to a fill, or a cancel.
+                * Disassociate the ids to keep memory bounded in the ids manager. Also close
+                * the action for the order id.
+                */
+              case ((is, as), o @ OrderDone(id, _, _, _, _, _)) =>
+//                println("order done", o)
+                strategy.handleEvent(StrategyOrderEvent(is(ex).actualToTarget(id), o))
+                (is.updated(ex, is(ex).orderComplete(id)),
+                  as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
+
+            } match {
+              case (_newIds, _newActions) =>
+                newIds = _newIds
+                newActions = _newActions
             }
+
+//            // The user data is relayed to the strategy as StrategyEvents
+//            try {
+//              userData
+//                .map(event => StrategyOrderEvent(newIds(ex).actualToTarget(event.orderId), event))
+//                .foreach(strategy.handleEvent)
+//            } catch {
+//              case err: Throwable =>
+//                err.printStackTrace()
+//            }
+
+            var newPrices = prices
 
             // If this data has price info attached, emit that price info.
             data match {
@@ -424,41 +470,13 @@ object TradingSession {
               case _ =>
             }
 
-            def acc(currency: String) = Account(ex, currency)
-
-            userData.foldLeft((newIds, newActions)) {
-              /**
-                * Either market or limit order received by the exchange. Associate the client id
-                * with the exchange id. Do not close any actions yet. Wait until the order is
-                * open, in the case of limit order, or done if it's a market order.
-                */
-              case ((is, as), OrderReceived(id, _, clientId, _)) =>
-                println("order received", id, clientId)
-                (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
-
-              /**
-                * Limit order is opened on the exchange. Close the action that submitted it.
-                */
-              case ((is, as), OrderOpen(id, _, _, _, _)) =>
-                (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-              /**
-                * Either market or limit order is done. Could be due to a fill, or a cancel.
-                * Disassociate the ids to keep memory bounded in the ids manager. Also close
-                * the action for the order id.
-                */
-              case ((is, as), OrderDone(id, _, _, _, _, _)) =>
-                println("order done", id)
-                (is.updated(ex, is(ex).orderComplete(id)),
-                  as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-            } match {
-              case (_newIds, _newActions) =>
-                newIds = _newIds
-                newActions = _newActions
+            var newReportEvents = Queue.empty[ReportEvent]
+            def emitReportEvent(e: ReportEvent): Unit = {
+              newReportEvents = newReportEvents.enqueue(e)
             }
 
-            newBalances = fills.foldLeft(newBalances) {
+            def acc(currency: String) = Account(ex, currency)
+            val newBalances = fills.foldLeft(balances) {
               case (bs, Fill(_, tradeId, fee, pair@Pair(base, quote), price, size,
                   micros, liquidity, side)) =>
 
@@ -508,8 +526,33 @@ object TradingSession {
                 ret
             }
 
+            // Use a sequence number to enforce the rule that Session.handleEvents is only
+            // allowed to be called in the current call stack. Send market data to strategy,
+            // then lock the handleEvent method again.
+            val sessionInstance = session.copy(
+              prices = newPrices,
+              balances = newBalances
+            )
+
+            data match {
+              case Some(md) =>
+                currentStrategySeqNr = Some(session.seqNr)
+                try {
+                  strategy.handleData(md)(sessionInstance)
+                } catch {
+                  case e: Throwable =>
+                    println(e.getMessage)
+                }
+                currentStrategySeqNr = None
+              case None =>
+            }
+
+            // These should be empty if `handleData` wasn't called.
+            newReportEvents ++= sessionInstance.collectReportEvents
+
             // Send the order targets to the corresponding order manager.
-            targets.foreach { target =>
+            var newOMs = oms
+            sessionInstance.collectTargets.foreach { target =>
               newOMs += (target.exchangeName ->
                 newOMs(target.exchangeName).submitTarget(target))
             }
@@ -524,7 +567,8 @@ object TradingSession {
                   newBalances.filter(_._1.exchange == exName)
                     .map { case (acc, value) => (acc.currency, value) },
                   newPrices.filter(_._1.exchange == exName)
-                    .map { case (market, value) => (market.product, value) }
+                    .map { case (market, value) => (market.product, value) },
+                  sessionInstance.hedges
                 ) match {
                   case (_om, _actions) =>
                     newOMs += (exName -> _om)
@@ -553,17 +597,15 @@ object TradingSession {
                     //                        pPair(ex, pair).amount(if (side == Buy) Quote else Base, percent)
                     //                      ))
 
-                    case CancelLimitOrder(id, targetId, pair) =>
-                      exchanges(exName).cancel(ids(exName).actualIdForTargetId(targetId))
+                    case CancelLimitOrder(targetId, pair) =>
+                      exchanges(exName).cancel(newIds(exName).actualIdForTargetId(targetId), pair)
                   }
                 case _ =>
               }
             }
 
-            session.copy(
+            sessionInstance.copy(
               seqNr = seqNr + 1,
-              balances = newBalances,
-              prices = newPrices,
               orderManagers = newOMs,
               actionQueues = newActions,
               ids = newIds,

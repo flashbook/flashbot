@@ -4,7 +4,7 @@ import io.circe.Json
 import core.Utils.parseProductId
 import core.DataSource.{Address, DataSourceConfig}
 import core.Report.{TimeSeriesCandle, TimeSeriesEvent}
-import core.TradingSession.{OrderTarget, SessionReportEvent}
+import core.TradingSession._
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -43,18 +43,85 @@ abstract class Strategy {
 
   def orderTargetRatio(exchangeName: String,
                        product: String,
-                       ratio: Double)
+                       ratio: Double,
+                       scope: Scope = PairScope)
                       (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(exchangeName, ratio, parseProductId(product), None))
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Ratio(ratio, scope),
+      parseProductId(product),
+      None
+    ))
   }
 
   def orderTargetRatio(exchangeName: String,
                        product: String,
                        ratio: Double,
                        price: Double,
-                       name: String)
+                       name: String,
+                       scope: Scope)
                       (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(exchangeName, ratio, parseProductId(product), Some(name, price)))
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Ratio(ratio, scope),
+      parseProductId(product),
+      Some(name, price)))
+  }
+
+  def order(exchangeName: String,
+            product: String,
+            amount: Double)
+           (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Amount(amount),
+      parseProductId(product),
+      None
+    ))
+  }
+
+  def order(exchangeName: String,
+            product: String,
+            amount: Double,
+            price: Double,
+            name: String)
+           (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Amount(amount),
+      parseProductId(product),
+      Some(name, price)))
+  }
+
+  def orderNotional(exchangeName: String,
+                    product: String,
+                    funds: Double)
+                   (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Funds(funds),
+      parseProductId(product),
+      None
+    ))
+  }
+
+  def orderNotional(exchangeName: String,
+                    product: String,
+                    funds: Double,
+                    price: Double,
+                    name: String)
+                   (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(OrderTarget(
+      exchangeName,
+      Funds(funds),
+      parseProductId(product),
+      Some(name, price)
+    ))
+  }
+
+  def setHedge(coin: String, position: Long)
+              (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SetHedge(coin, position))
   }
 
   def record(name: String, value: Double, micros: Long)

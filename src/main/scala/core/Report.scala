@@ -45,6 +45,9 @@ case class Report(strategy: String,
     case e: TimeSeriesEvent =>
       genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value) :: Nil
 
+    case e: TimeSeriesCandle =>
+      CandleAdd(e.key, e.candle) :: Nil
+
   }
 
   /**
@@ -107,8 +110,10 @@ object Report {
   case class BalanceEvent(account: Account,
                           balance: Double,
                           micros: Long) extends ReportEvent with Timestamped
+
   case class TimeSeriesEvent(key: String, value: Double, micros: Long)
     extends ReportEvent with Timestamped
+
   case class TimeSeriesCandle(key: String, candle: Candle)
     extends ReportEvent with Timestamped {
     override def micros: Long = candle.micros

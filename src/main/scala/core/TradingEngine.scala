@@ -160,7 +160,7 @@ class TradingEngine(dataDir: String,
         .map(ReportUpdated(botId, _))
         .toList
 
-//      println("processing bot session event", event, deltas)
+      println("processing bot session event", event, deltas)
 
       Right(event match {
         case BalanceEvent(account, balance, micros) =>

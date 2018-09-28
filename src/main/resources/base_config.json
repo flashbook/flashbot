@@ -482,19 +482,6 @@
           "retention": "90d"
         }
       }
-    },
-
-    "resources": {
-      "class": "sources.ResourceMarketDataSource",
-      "topics": {
-        "btc_usd": {},
-        "eth_usd": {}
-      },
-      "data_types": {
-        "candles_1h": {
-          "retention": "90d"
-        }
-      }
     }
   },
 

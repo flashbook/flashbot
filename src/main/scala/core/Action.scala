@@ -14,7 +14,7 @@ object Action {
                              size: Option[Double], funds: Option[Double]) extends Action
   case class PostLimitOrder(id: String, targetId: String, pair: Pair, side: Side,
                             size: Double, price: Double) extends Action
-  case class CancelLimitOrder(id: String, targetId: String, pair: Pair) extends Action
+  case class CancelLimitOrder(targetId: String, pair: Pair) extends Action
 
   case class ActionQueue(active: Option[Action] = None, queue: Queue[Action] = Queue.empty) {
     def enqueue(action: Action): ActionQueue = copy(queue = queue.enqueue(action))

@@ -72,8 +72,7 @@ object Main {
           .text("Comma separated list of topics to ingest"),
         opt[Seq[String]]("types")
           .action((x, c) => c.copy(types = x))
-          .text("Comma separated list of data types to ingest")
-      )
+          .text("Comma separated list of data types to ingest"))
 
     cmd("server").action((_, c) => c.copy(cmd = "server"))
       .text("Start a local trading server.")
@@ -83,8 +82,7 @@ object Main {
           .text("Comma separated list of bots to run"),
         opt[Int]('p', "port")
           .action((x, c) => c.copy(port = x))
-          .text("Which port to expose the HTTP API on. Defaults to 9020.")
-      )
+          .text("Which port to expose the HTTP API on. Defaults to 9020."))
 
     help("help").text("Prints this usage text")
 

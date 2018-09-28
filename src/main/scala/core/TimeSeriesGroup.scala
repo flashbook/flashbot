@@ -13,7 +13,7 @@ class TimeSeriesGroup(period: Duration) {
   var allSeries: Map[String, TimeSeries] = Map.empty
 
   def record(exchange: String,
-             product: Pair,
+             product: String,
              micros: Long,
              price: Double,
              amount: Option[Double] = None): Unit = {
@@ -41,26 +41,44 @@ class TimeSeriesGroup(period: Duration) {
   }
 
   def record(exchange: String,
-             product: Pair,
+            product: Pair,
+            micros: Long,
+            price: Double,
+            amount: Option[Double]): Unit =
+    record(exchange, product.toString, micros, price, amount)
+
+  def record(exchange: String,
+             product: String,
              candle: Candle): Unit = {
     val key = _key(exchange, product)
     val series =
       if (allSeries.isDefinedAt(key)) allSeries(key)
       else new BaseTimeSeries.SeriesBuilder().withName(key).build()
 
-    val zdt = ZonedDateTime.ofInstant(Instant.ofEpochMilli(candle.micros / 1000), ZoneOffset.UTC)
+    val zdt = ZonedDateTime
+      .ofInstant(Instant.ofEpochMilli(candle.micros / 1000), ZoneOffset.UTC)
+
+    while (series.getBarCount > 0 && !series.getLastBar.inPeriod(zdt.minus(period))) {
+      series.addBar(period, series.getLastBar.getEndTime.plus(period))
+    }
 
     if (candle.volume.isDefined) {
-      series.addBar(zdt, candle.open, candle.high, candle.low, candle.close, candle.volume.get)
+      series.addBar(zdt.plus(period), candle.open, candle.high, candle.low, candle.close, candle.volume.get)
     } else {
-      series.addBar(zdt, candle.open, candle.high, candle.low, candle.close)
+      series.addBar(zdt.plus(period), candle.open, candle.high, candle.low, candle.close)
     }
 
     allSeries = allSeries + (key -> series)
   }
 
-  def get(exchange: String, product: Pair): Option[TimeSeries] =
+  def record(exchange: String,
+             product: Pair,
+             candle: Candle): Unit = record(exchange, product.toString, candle)
+
+  def get(exchange: String, product: String): Option[TimeSeries] =
     allSeries.get(_key(exchange, product))
 
-  def _key(exchange: String, product: Pair): String = s"$exchange.$product"
+  def get(exchange: String, product: Pair): Option[TimeSeries] = get(exchange, product.toString)
+
+  def _key(exchange: String, product: String): String = s"$exchange.$product"
 }

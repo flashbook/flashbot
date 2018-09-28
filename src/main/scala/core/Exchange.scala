@@ -16,11 +16,11 @@ abstract class Exchange {
 
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
-  def cancel(id: String): Unit
+  def cancel(id: String, pair: Pair): Unit
 
   def baseAssetPrecision(pair: Pair): Int
   def quoteAssetPrecision(pair: Pair): Int
-  def lotSize(pair: Pair): Double
+  def lotSize(pair: Pair): Option[Double] = None
 
   def useFundsForMarketBuys: Boolean = false
 
@@ -40,7 +40,7 @@ abstract class Exchange {
     * trading session.
     */
   def collect(session: TradingSession,
-                       data: Option[MarketData]): (Seq[Fill], Seq[OrderEvent]) = {
+              data: Option[MarketData]): (Seq[Fill], Seq[OrderEvent]) = {
     val ret = (fills, events)
     fills = Seq.empty
     events = Seq.empty

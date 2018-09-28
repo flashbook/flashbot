@@ -131,9 +131,9 @@ class Binance(params: Json)(implicit val system: ActorSystem,
   override def quoteAssetPrecision(pair: Pair): Int =
     exchangeInfo.symbol(formatPair(pair)).quotePrecision
 
-  override def lotSize(pair: Pair): Double =
+  override def lotSize(pair: Pair): Option[Double] =
     exchangeInfo.symbol(formatPair(pair)).filters
-      .find(_.filterType == "LOT_SIZE").get.stepSize.get.toDouble
+      .find(_.filterType == "LOT_SIZE").get.stepSize.map(_.toDouble)
 
   override def useFundsForMarketBuys: Boolean = false
 
