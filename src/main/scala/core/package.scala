@@ -21,7 +21,7 @@ package object core {
     def apply(str: String): Pair = Utils.parseProductId(str)
   }
 
-  case class Trade(id: String, micros: Long, price: Double, size: Double) extends Timestamped
+  case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped
 
   case class TradeMD(source: String, topic: String, data: Trade)
     extends GenMD[Trade] with Priced {
@@ -125,7 +125,7 @@ package object core {
   case class Tick(exchange: String)
 
   sealed trait StrategyEvent
-  case class StrategyOrderEvent(targetId: String, event: OrderEvent) extends StrategyEvent
+  case class StrategyOrderEvent(targetId: TargetId, event: OrderEvent) extends StrategyEvent
 
   sealed trait Size
   sealed trait FixedSize extends Size {
@@ -156,5 +156,5 @@ package object core {
   case object PairScope extends Scope
   case class Basket(coins: Set[String]) extends Scope
 
-  final case class TargetID(pair: Pair, key: String)
+  final case class TargetId(pair: Pair, key: String)
 }

@@ -39,7 +39,7 @@ class TEMACrossover extends Strategy {
   }
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = data match {
-    case md @ TradeMD(source, topic, Trade(_, _, price, size)) =>
+    case md @ TradeMD(source, topic, Trade(_, _, price, size, _)) =>
 
       println(md)
 

@@ -1,7 +1,8 @@
 package exchanges
 
 import core.AggBook.{AggBook, AggBookMD, aggFillOrder}
-import core.Order.{Buy, Fill, Market, Taker}
+import core.Order
+import core.Order._
 import core.OrderBook.OrderBookMD
 import core._
 
@@ -12,7 +13,7 @@ import scala.collection.immutable.Queue
   * real exchange as a parameter to use as a base implementation, but it simulates all API
   * interactions so that no network requests are actually made.
   */
-class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
+class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
 
   private var currentTimeMicros: Long = 0
 
@@ -20,7 +21,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
     def requestTime: Long
   }
   case class OrderReq(requestTime: Long, req: OrderRequest) extends APIRequest
-  case class CancelReq(requestTime: Long, id: String) extends APIRequest
+  case class CancelReq(requestTime: Long, id: String, pair: Pair) extends APIRequest
 
   private var apiRequestQueue = Queue.empty[APIRequest]
 
@@ -52,9 +53,32 @@ class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
                 * Limit orders may be filled (fully or partially) immediately. If not immediately
                 * fully filled, the remainder is placed on the resting order book.
                 */
-              case LimitOrderRequest(clientOid, side, product, price, size) =>
-                // TODO: Implement this
-                ???
+              case LimitOrderRequest(clientOid, side, product, size, price, postOnly) =>
+                if (!depths.isDefinedAt(product)) {
+                  throw new RuntimeException("Aggregate order books are required to simulate " +
+                    "limit orders.")
+                }
+
+                val immediateFills =
+                  aggFillOrder(depths(product), side, Some(size), None)
+                  .map { case (fillPrice, fillQuantity) =>
+                    Fill(clientOid, Some(clientOid), takerFee, product, fillPrice, fillQuantity,
+                      evTime, Taker, side)
+                  }
+                fills :+= immediateFills
+
+                events :+= OrderReceived(clientOid, product, Some(clientOid), Order.Limit)
+
+                // Either complete or open the limit order
+                val remainingSize = size - immediateFills.map(_.size).sum
+                if (remainingSize > 0) {
+                  myOrders = myOrders + (product ->
+                    myOrders.getOrElse(product, OrderBook())
+                      .open(clientOid, price, remainingSize, side))
+                  events :+= OrderOpen(clientOid, product, price, remainingSize, side)
+                } else {
+                  events :+= OrderDone(clientOid, product, side, Filled, Some(price), Some(0))
+                }
 
               /**
                 * Market orders need to be filled immediately.
@@ -67,7 +91,6 @@ class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
                         product, price, quantity, evTime, Taker, side)}
 
                 } else if (prices.isDefinedAt(product)) {
-//                  println(size, funds)
                   // We may not have aggregate book data, in that case, simply use the last price.
                   fills = fills :+ Fill(
                     clientOid, Some(clientOid), takerFee, product, prices(product),
@@ -81,39 +104,76 @@ class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
                 }
 
                 events = events :+
-                  OrderReceived(clientOid, product, Some(clientOid), Market) :+
+                  OrderReceived(clientOid, product, Some(clientOid), Order.Market) :+
                   OrderDone(clientOid, product, side, Filled, None, None)
             }
 
             /**
               * Removes the identified order from the resting order book.
               */
-            case CancelReq(_, id) =>
-              myOrders.foreach {
-                case (product, book) if book.orders.contains(id) =>
-                  val order = book.orders(id)
-                  myOrders = myOrders + (product -> book.done(id))
-                  events = events :+ OrderDone(id, product, order.side, Canceled,
-                    order.price, Some(order.amount))
-                case _ =>
-              }
+            case CancelReq(_, id, pair) =>
+              val order = myOrders(pair).orders(id)
+              myOrders = myOrders + (pair -> myOrders(pair).done(id))
+              events = events :+ OrderDone(id, pair, order.side, Canceled,
+                order.price, Some(order.amount))
           }
           apiRequestQueue = rest
       }
     }
 
-
-    // Update latest depth/pricing data
-    data.get match {
-      case md: OrderBookMD[_] =>
+    // Update latest depth/pricing data.
+    data match {
+      case Some(md: OrderBookMD[_]) =>
         // TODO: Turn aggregate full order books into aggregate depths here
         ???
-      case md: AggBookMD =>
+      case Some(md: AggBookMD) =>
         depths = depths + (md.product -> md.data)
-      case md: Priced =>
+      case Some(md: Priced) =>
         prices = prices + (md.product -> md.price)
+
+      /**
+        * Match trades against the aggregate book. This is a pretty naive matching strategy.
+        * We should use a more precise matching engine for full order books. Also, this mutates
+        * our book depths until they are overwritten by a more recent depth snapshot.
+        */
+      case Some(md: TradeMD) if depths.isDefinedAt(md.product) =>
+        // First simulate fills on the aggregate book. Remove the associated liquidity from
+        // the depths.
+        val simulatedFills =
+          aggFillOrder(depths(md.product), md.data.side, Some(md.data.size), None, None)
+        simulatedFills.foreach { case (fillPrice, fillAmount) =>
+            depths = depths + (md.product -> depths(md.product).updateLevel(
+              md.data.side match {
+                case Buy => Ask
+                case Sell => Bid
+              }, fillPrice, depths(md.product).quantityAtPrice(fillPrice).get - fillAmount
+            ))
+        }
+
+        // Then use the fills to determine if any of our orders would have executed.
+        if (myOrders.isDefinedAt(md.product)) {
+          val lastFillPrice = simulatedFills.last._1
+          val filledOrders = md.data.side match {
+            case Buy =>
+              myOrders(md.product).asks.filter(_._1 < lastFillPrice).values.toSet.flatten
+            case Sell =>
+              myOrders(md.product).bids.filter(_._1 > lastFillPrice).values.toSet.flatten
+          }
+          filledOrders.foreach { order =>
+            // Remove order from private book
+            myOrders = myOrders + (md.product -> myOrders(md.product).done(order.id))
+
+            // Emit OrderDone event
+            events :+= OrderDone(order.id, md.product, order.side, Filled, order.price, Some(0))
+
+            // Emit the fill
+            fills :+= Fill(order.id, Some(md.data.id), makerFee, md.product, order.price.get,
+              order.amount, md.micros, Maker, order.side)
+          }
+        }
       case _ =>
     }
+
 
     (fills, events)
   }
@@ -122,8 +182,8 @@ class Simulator(base: Exchange, latencyMicros: Long = 100000) extends Exchange {
     apiRequestQueue = apiRequestQueue.enqueue(OrderReq(currentTimeMicros, req))
   }
 
-  override def cancel(id: String): Unit = {
-    apiRequestQueue = apiRequestQueue.enqueue(CancelReq(currentTimeMicros, id))
+  override def cancel(id: String, pair: Pair): Unit = {
+    apiRequestQueue = apiRequestQueue.enqueue(CancelReq(currentTimeMicros, id, pair))
   }
 
   override def baseAssetPrecision(pair: Pair): Int = base.baseAssetPrecision(pair)

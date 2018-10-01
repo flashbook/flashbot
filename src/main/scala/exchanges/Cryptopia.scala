@@ -13,7 +13,7 @@ class Cryptopia(params: Json)(implicit val system: ActorSystem,
 
   override def order(req: OrderRequest): Unit = ???
 
-  override def cancel(id: String): Unit = ???
+  override def cancel(id: String, pair: Pair): Unit = ???
 
   override def baseAssetPrecision(pair: core.Pair): Int = ???
 

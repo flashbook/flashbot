@@ -7,7 +7,8 @@ import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill}
 import akka.stream.{ActorAttributes, ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
-import core.Action.{ActionQueue, CancelLimitOrder, PostMarketOrder}
+import core.Action.{ActionQueue, CancelLimitOrder, PostLimitOrder, PostMarketOrder}
+import core.AggBook.{AggBook, AggBookMD}
 import core.DataSource.{Address, DataSourceConfig}
 import core.Exchange.ExchangeConfig
 import core.Order.{Buy, Fill, Sell}
@@ -27,16 +28,14 @@ object TradingSession {
   trait Event
   case class LogMessage(message: String) extends Event
   case class OrderTarget(exchangeName: String,
+                         targetId: TargetId,
                          size: Size,
-                         pair: Pair,
-                         price: Option[(String, Double)]) extends Event {
-    def id: String = (exchangeName :: pair ::
-      price.map(_._1).map(List(_)).getOrElse(List.empty)).mkString(":")
-  }
+                         price: Option[Double],
+                         postOnly: Boolean) extends Event
   case class SetHedge(coin: String, position: Long) extends Event
   case class SessionReportEvent(event: ReportEvent) extends Event
 
-  def exchangeNameForTargetId(id: String): String = id.split(":").head
+//  def exchangeNameForTargetId(id: String): String = id.split(":").head
 
   sealed trait Mode
   case class Backtest(range: TimeRange) extends Mode
@@ -280,8 +279,6 @@ object TradingSession {
                            actionQueues: Map[String, ActionQueue] = markets
                              .mapValues(_ => ActionQueue()),
 
-                           // Also an id manager per exchange
-                           ids: Map[String, IdManager] = markets.mapValues(_ => IdManager()),
                            emittedReportEvents: Seq[ReportEvent] = Seq.empty)
 
           extends TradingSession {
@@ -388,8 +385,8 @@ object TradingSession {
             case md: MarketData => Left(md)
             case tick: Tick => Right(tick)
           }
-          .scan(Session()) { case (session@Session(seqNr, balances, prices, oms,
-              actions, ids, _), dataOrTick) =>
+          .scan(Session()) { case (session@Session(
+              seqNr, balances, prices, oms, actions, _), dataOrTick) =>
 
             implicit val ctx: TradingSession = session
 
@@ -401,60 +398,9 @@ object TradingSession {
 
             val ex = data.map(_.source).getOrElse(tick.get.exchange)
 
-            // Update the relevant exchange with the market data to collect fills and user data
-            // TODO: This doesn't support non-exchange data sources yet
-            val (fills, userData) = exchanges(ex).collect(session, data)
-
-            var newIds = ids
-            var newActions = actions
-
-            userData.foldLeft((newIds, newActions)) {
-              /**
-                * Either market or limit order received by the exchange. Associate the client id
-                * with the exchange id. Do not close any actions yet. Wait until the order is
-                * open, in the case of limit order, or done if it's a market order.
-                */
-              case ((is, as), o @ OrderReceived(id, _, clientId, _)) =>
-//                println("order received", id, clientId)
-                strategy.handleEvent(StrategyOrderEvent(is(ex).clientToTarget(clientId.get), o))
-                (is.updated(ex, is(ex).receivedOrder(clientId.get, id)), as)
-
-              /**
-                * Limit order is opened on the exchange. Close the action that submitted it.
-                */
-              case ((is, as), o @ OrderOpen(id, _, _, _, _)) =>
-//                println("order open", id)
-                strategy.handleEvent(StrategyOrderEvent(is(ex).actualToTarget(id), o))
-                (is, as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-              /**
-                * Either market or limit order is done. Could be due to a fill, or a cancel.
-                * Disassociate the ids to keep memory bounded in the ids manager. Also close
-                * the action for the order id.
-                */
-              case ((is, as), o @ OrderDone(id, _, _, _, _, _)) =>
-//                println("order done", o)
-                strategy.handleEvent(StrategyOrderEvent(is(ex).actualToTarget(id), o))
-                (is.updated(ex, is(ex).orderComplete(id)),
-                  as.updated(ex, closeActionForOrderId(as(ex), is(ex), id)))
-
-            } match {
-              case (_newIds, _newActions) =>
-                newIds = _newIds
-                newActions = _newActions
-            }
-
-//            // The user data is relayed to the strategy as StrategyEvents
-//            try {
-//              userData
-//                .map(event => StrategyOrderEvent(newIds(ex).actualToTarget(event.orderId), event))
-//                .foreach(strategy.handleEvent)
-//            } catch {
-//              case err: Throwable =>
-//                err.printStackTrace()
-//            }
-
             var newPrices = prices
+            var newOMs = oms
+            var newActions = actions
 
             // If this data has price info attached, emit that price info.
             data match {
@@ -468,6 +414,43 @@ object TradingSession {
                 // TODO: Emit prices here
 //                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
               case _ =>
+            }
+
+            // Update the relevant exchange with the market data to collect fills and user data
+            // TODO: This doesn't support non-exchange data sources yet
+            val (fills, userData) = exchanges(ex).collect(session, data)
+            userData.foldLeft((newOMs, newActions)) {
+              /**
+                * Either market or limit order received by the exchange. Associate the client id
+                * with the exchange id. Do not close any actions yet. Wait until the order is
+                * open, in the case of limit order, or done if it's a market order.
+                */
+              case ((os, as), o @ OrderReceived(id, _, clientId, _)) =>
+                strategy.handleEvent(StrategyOrderEvent(os(ex).ids.clientToTarget(clientId.get), o))
+                (os.updated(ex, os(ex).receivedOrder(clientId.get, id)), as)
+
+              /**
+                * Limit order is opened on the exchange. Close the action that submitted it.
+                */
+              case ((os, as), o @ OrderOpen(id, _, _, _, _)) =>
+                strategy.handleEvent(StrategyOrderEvent(os(ex).ids.actualToTarget(id), o))
+                (os.updated(ex, os(ex).openOrder(o)),
+                  as.updated(ex, closeActionForOrderId(as(ex), os(ex).ids, id)))
+
+              /**
+                * Either market or limit order is done. Could be due to a fill, or a cancel.
+                * Disassociate the ids to keep memory bounded in the ids manager. Also close
+                * the action for the order id.
+                */
+              case ((os, as), o @ OrderDone(id, _, _, _, _, _)) =>
+                strategy.handleEvent(StrategyOrderEvent(os(ex).ids.actualToTarget(id), o))
+                (os.updated(ex, os(ex).orderComplete(id)),
+                  as.updated(ex, closeActionForOrderId(as(ex), os(ex).ids, id)))
+
+            } match {
+              case (_newOMs, _newActions) =>
+                newOMs = _newOMs
+                newActions = _newActions
             }
 
             var newReportEvents = Queue.empty[ReportEvent]
@@ -547,11 +530,10 @@ object TradingSession {
               case None =>
             }
 
-            // These should be empty if `handleData` wasn't called.
+            // Collected report events and targets should be empty if `handleData` wasn't called.
             newReportEvents ++= sessionInstance.collectReportEvents
 
             // Send the order targets to the corresponding order manager.
-            var newOMs = oms
             sessionInstance.collectTargets.foreach { target =>
               newOMs += (target.exchangeName ->
                 newOMs(target.exchangeName).submitTarget(target))
@@ -581,24 +563,21 @@ object TradingSession {
               acs match {
                 case ActionQueue(None, next +: rest) =>
                   newActions += (exName -> ActionQueue(Some(next), rest))
-
                   next match {
-                    case PostMarketOrder(clientId, targetId, pair, side, size, funds) =>
-                      newIds += (exName -> newIds(exName).initOrder(targetId, clientId))
-                      exchanges(exName).order(MarketOrderRequest(clientId, side, pair, size, funds))
+                    case action @ PostMarketOrder(clientId, targetId, side, size, funds) =>
+                      newOMs += (exName -> newOMs(exName).initCreateOrder(targetId, clientId, action))
+                      exchanges(exName).order(
+                        MarketOrderRequest(clientId, side, targetId.pair, size, funds))
 
-                    //                  case PostLimitOrder(clientId, targetId, pair, side, percent, price) =>
-                    //                    newIds = newIds.updated(ex, newIds(ex).initOrder(targetId, clientId))
-                    //                    exchanges(ex)
-                    //                      .order(LimitOrderRequest(clientId, side, pair,
-                    //                        BigDecimal(price).setScale(quoteIncr(pair.quote),
-                    //                          if (side == Buy) BigDecimal.RoundingMode.CEILING
-                    //                          else BigDecimal.RoundingMode.FLOOR).doubleValue,
-                    //                        pPair(ex, pair).amount(if (side == Buy) Quote else Base, percent)
-                    //                      ))
+                    case action @ PostLimitOrder(clientId, targetId, side, size, price, postOnly) =>
+                      newOMs = newOMs.updated(exName, newOMs(exName).initCreateOrder(targetId, clientId, action))
+                      exchanges(exName)
+                        .order(LimitOrderRequest(clientId, side, targetId.pair, size, price, postOnly))
 
-                    case CancelLimitOrder(targetId, pair) =>
-                      exchanges(exName).cancel(newIds(exName).actualIdForTargetId(targetId), pair)
+                    case CancelLimitOrder(targetId) =>
+                      newOMs = newOMs.updated(exName, newOMs(exName).initCancelOrder(targetId))
+                      exchanges(exName)
+                        .cancel(newOMs(exName).ids.actualIdForTargetId(targetId), targetId.pair)
                   }
                 case _ =>
               }
@@ -608,7 +587,6 @@ object TradingSession {
               seqNr = seqNr + 1,
               orderManagers = newOMs,
               actionQueues = newActions,
-              ids = newIds,
               emittedReportEvents = newReportEvents
             )
           }
@@ -646,29 +624,6 @@ object TradingSession {
             runSession(sessionSetup)
         }
     }
-  }
-
-  // Manages the relationships of the three types of order ids in our system:
-  // Actual ids, client ids, target ids.
-  case class IdManager(clientToTarget: Map[String, String] = Map.empty,
-                       targetToActual: Map[String, String] = Map.empty,
-                       actualToTarget: Map[String, String] = Map.empty) {
-
-    def initOrder(targetId: String, clientId: String): IdManager =
-      copy(clientToTarget = clientToTarget + (clientId -> targetId))
-
-    def receivedOrder(clientId: String, actualId: String): IdManager = copy(
-      targetToActual = targetToActual + (clientToTarget(clientId) -> actualId),
-      actualToTarget = actualToTarget + (actualId -> clientToTarget(clientId)),
-      clientToTarget = clientToTarget - clientId
-    )
-
-    def orderComplete(actualId: String): IdManager = copy(
-      targetToActual = targetToActual - actualToTarget(actualId),
-      actualToTarget = actualToTarget - actualId
-    )
-
-    def actualIdForTargetId(targetId: String): String = targetToActual(targetId)
   }
 
   def closeActionForOrderId(actions: ActionQueue, ids: IdManager, id: String): ActionQueue =

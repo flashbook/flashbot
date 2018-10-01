@@ -41,7 +41,7 @@ class DualMovingAverageCrossover extends Strategy {
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = {
     data match {
-      case md @ TradeMD(source, topic, Trade(_, _, price, size)) =>
+      case md @ TradeMD(source, topic, Trade(_, _, price, size, _)) =>
         // Update the time series
         ts.get.record(source, md.product, md.micros, price, Some(size))
 

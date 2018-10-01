@@ -8,7 +8,7 @@ class GDAX extends Exchange {
 
   override def order(req: OrderRequest): Unit = ???
 
-  override def cancel(id: String): Unit = ???
+  override def cancel(id: String, pair: Pair): Unit = ???
 
   override def baseAssetPrecision(pair: Pair): Int = ???
 

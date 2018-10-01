@@ -37,10 +37,12 @@ object AggBook {
     )
 
     def spread: Option[Double] = {
-      if (asks.asInstanceOf[SortedMap[Double, Double]].firstKey > asks.asInstanceOf[SortedMap[Double, Double]].lastKey) {
+      if (asks.asInstanceOf[SortedMap[Double, Double]].firstKey >
+          asks.asInstanceOf[SortedMap[Double, Double]].lastKey) {
         throw new RuntimeException("Asks out of order")
       }
-      if (bids.asInstanceOf[SortedMap[Double, Double]].firstKey < bids.asInstanceOf[SortedMap[Double, Double]].lastKey) {
+      if (bids.asInstanceOf[SortedMap[Double, Double]].firstKey <
+          bids.asInstanceOf[SortedMap[Double, Double]].lastKey) {
         throw new RuntimeException("Bids out of order")
       }
 
@@ -54,6 +56,9 @@ object AggBook {
       else Some((asks.asInstanceOf[SortedMap[Double, Double]].firstKey +
         bids.asInstanceOf[SortedMap[Double, Double]].firstKey) / 2)
     }
+
+    def quantityAtPrice(price: Double): Option[Double] =
+      asks.get(price).orElse(bids.get(price))
   }
 
   implicit val aggBookDecoder: Decoder[AggBook] = deriveDecoder[AggBook]
@@ -64,13 +69,28 @@ object AggBook {
       if (reverse) -price else price
     )))(_ + _)
 
-  def aggFillOrder(book: AggBook, side: Side,
-                   sizeOpt: Option[Double], fundsOpt: Option[Double])
+  /**
+    * Match an incoming order against an aggregated order book. Emit fills.
+    * TODO: Add Time-In-Force controls such as Fill Or Kill.
+    */
+  def aggFillOrder(book: AggBook,
+                   side: Side,
+                   sizeOpt: Option[Double],
+                   fundsOpt: Option[Double],
+                   limit: Option[Double] = None)
     : Seq[(Double, Double)] = {
 
     var fills = Seq.empty[(Double, Double)]
     (side, sizeOpt, fundsOpt) match {
+      /**
+        * Special case for when a market order is placed in terms of notional funds.
+        * Does not support limits, crash if one is provided.
+        */
       case (Buy, None, Some(funds)) =>
+        if (limit.isDefined) {
+          throw new RuntimeException("A limit order cannot be placed in terms of notional funds.")
+        }
+
         val ladder = book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
         var remainingFunds = funds
         while (remainingFunds > 0) {
@@ -83,30 +103,35 @@ object AggBook {
           remainingFunds -= min
         }
 
-      case (Buy, Some(size), None) =>
-        val ladder = book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
-        var remainingSize = size
-        while (remainingSize > 0) {
-          if (!ladder.hasNext) {
-            throw new RuntimeException("Book not deep enough to fill order")
-          }
-          val (price, quantity) = ladder.next
-          val min = math.min(remainingSize, quantity)
-          fills :+= (price, min)
-          remainingSize -= min
+      /**
+        * The general case, for both market and limit orders that are placed in terms
+        * of base quantity.
+        */
+      case (_, Some(size), None) =>
+        val ladder = side match {
+          case Buy =>
+            book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+          case Sell =>
+            book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
         }
-
-      case (Sell, Some(size), None) =>
-        val ladder = book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
         var remainingSize = size
-        while (remainingSize > 0) {
+        var limitExceeded = false
+        while (remainingSize > 0 && !limitExceeded) {
           if (!ladder.hasNext) {
             throw new RuntimeException("Book not deep enough to fill order")
           }
           val (price, quantity) = ladder.next
-          val min = math.min(remainingSize, quantity)
-          fills :+= (price, min)
-          remainingSize -= min
+          if (limit.isDefined) {
+            limitExceeded = side match {
+              case Buy => price > limit.get
+              case Sell => price < limit.get
+            }
+          }
+          if (!limitExceeded) {
+            val min = math.min(remainingSize, quantity)
+            fills :+= (price, min)
+            remainingSize -= min
+          }
         }
     }
 
@@ -116,13 +141,9 @@ object AggBook {
   case class AggBookMD(source: String,
                        topic: String,
                        micros: Long,
-                       data: AggBook) extends GenMD[AggBook] with Priced {
+                       data: AggBook) extends GenMD[AggBook] {
     def dataType: String = s"book_${data.depth}"
     def product: Pair = parseProductId(topic)
-
-    override def exchange: String = source
-
-    override def price: Double = data.midMarketPrice.get
   }
 
   implicit val aggBookMDDecoder: Decoder[AggBookMD] = deriveDecoder[AggBookMD]

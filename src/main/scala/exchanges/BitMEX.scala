@@ -7,7 +7,7 @@ class BitMEX extends Exchange {
 
   override def takerFee: Double = ???
 
-  override def cancel(id: String): Unit = ???
+  override def cancel(id: String, pair: Pair): Unit = ???
 
   override def order(req: OrderRequest): Unit = ???
 

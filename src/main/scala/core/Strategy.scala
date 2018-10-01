@@ -15,6 +15,8 @@ import core.TradingSession._
   */
 abstract class Strategy {
 
+  val DEFAULT = "default"
+
   /**
     * Human readable title for display purposes.
     */
@@ -44,78 +46,43 @@ abstract class Strategy {
   def orderTargetRatio(exchangeName: String,
                        product: String,
                        ratio: Double,
+                       key: String = DEFAULT,
+                       price: Option[Double] = None,
                        scope: Scope = PairScope)
                       (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
+      TargetId(parseProductId(product), key),
       Ratio(ratio, scope),
-      parseProductId(product),
-      None
-    ))
-  }
-
-  def orderTargetRatio(exchangeName: String,
-                       product: String,
-                       ratio: Double,
-                       price: Double,
-                       name: String,
-                       scope: Scope)
-                      (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
-      exchangeName,
-      Ratio(ratio, scope),
-      parseProductId(product),
-      Some(name, price)))
-  }
-
-  def order(exchangeName: String,
-            product: String,
-            amount: Double)
-           (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
-      exchangeName,
-      Amount(amount),
-      parseProductId(product),
-      None
+      price
     ))
   }
 
   def order(exchangeName: String,
             product: String,
             amount: Double,
-            price: Double,
-            name: String)
+            key: String = DEFAULT,
+            price: Option[Double] = None)
            (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
+      TargetId(parseProductId(product), key),
       Amount(amount),
-      parseProductId(product),
-      Some(name, price)))
-  }
-
-  def orderNotional(exchangeName: String,
-                    product: String,
-                    funds: Double)
-                   (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
-      exchangeName,
-      Funds(funds),
-      parseProductId(product),
-      None
+      price
     ))
   }
 
   def orderNotional(exchangeName: String,
                     product: String,
                     funds: Double,
-                    price: Double,
-                    name: String)
+                    key: String = DEFAULT,
+                    price: Option[Double] = None)
                    (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
+      TargetId(parseProductId(product), key),
       Funds(funds),
-      parseProductId(product),
-      Some(name, price)
+      None
     ))
   }
 

@@ -59,8 +59,9 @@ sealed trait OrderRequest {
 final case class LimitOrderRequest(clientOid: String,
                                    side: Side,
                                    product: Pair,
+                                   size: Double,
                                    price: Double,
-                                   size: Double) extends OrderRequest
+                                   postOnly: Boolean) extends OrderRequest
 
 final case class MarketOrderRequest(clientOid: String,
                                     side: Side,

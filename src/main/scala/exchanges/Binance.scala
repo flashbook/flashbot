@@ -62,7 +62,7 @@ class Binance(params: Json)(implicit val system: ActorSystem,
   case class ErrRsp(code: Int, msg: String)
 
   override def order(req: OrderRequest): Unit = req match {
-    case LimitOrderRequest(clientOid, side, product, price, size) =>
+    case LimitOrderRequest(clientOid, side, product, size, price, postOnly) =>
       ???
 
     case mo @ MarketOrderRequest(clientOid, side, product, size, _) =>
@@ -123,7 +123,7 @@ class Binance(params: Json)(implicit val system: ActorSystem,
       }
   }
 
-  override def cancel(id: String): Unit = ???
+  override def cancel(id: String, pair: Pair): Unit = ???
 
   override def baseAssetPrecision(pair: Pair): Int =
     exchangeInfo.symbol(formatPair(pair)).baseAssetPrecision

@@ -496,7 +496,8 @@
     "secret_a": "strategies.SecretA",
     "secret_b": "strategies.SecretB",
     "secret_c": "strategies.SecretC",
-    "secret_d": "strategies.SecretD"
+    "secret_d": "strategies.SecretD",
+    "limit_test": "strategies.LimitOrderTest"
   },
 
   "currencies": {
