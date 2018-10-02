@@ -5,6 +5,7 @@ import core.DataSource.DataSourceConfig
 import core._
 import io.circe.Json
 import io.circe.generic.auto._
+import util.TablePrinter
 
 import scala.collection.immutable.TreeMap
 
@@ -27,21 +28,36 @@ class LimitOrderTest extends Strategy {
     s"${params.get.exchange}/${params.get.product}/book_10" :: Nil
   }
 
+  var priceToOrderKey = Map.empty[Double, String]
   override def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {
-    println(event)
+    event match {
+      case StrategyOrderEvent(targetId, ev) => ev match {
+        case e: OrderOpen => priceToOrderKey += (e.price -> targetId.key)
+        case e: OrderDone => priceToOrderKey -= e.price.get
+        case _ =>
+      }
+    }
   }
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = data match {
     case md: AggBookMD =>
-      println(md)
-
       val asks = md.data.asks.asInstanceOf[TreeMap[Double, Double]]
       val bids = md.data.bids.asInstanceOf[TreeMap[Double, Double]]
 
+      // Place orders
       order(params.get.exchange, params.get.product, params.get.order_size,
         price = Some(bids.drop(4).head._1), key = "bid_quote")
-
       order(params.get.exchange, params.get.product, -params.get.order_size,
         price = Some(asks.drop(4).head._1), key = "ask_quote")
+
+      // Print the ladder
+      val heading = "Order ID" :: "Bid" :: "Price" :: "Ask" :: Nil
+      val askRows = asks.toSeq.reverse.map { case (price, quantity) =>
+        priceToOrderKey.getOrElse(price, "") :: "" :: price.toString :: quantity.toString :: Nil
+      }
+      val bidRows = bids.toSeq.map { case (price, quantity) =>
+        priceToOrderKey.getOrElse(price, "") :: quantity.toString :: price.toString :: "" :: Nil
+      }
+      println(TablePrinter.format(heading +: (askRows ++ bidRows)))
   }
 }
