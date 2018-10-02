@@ -2,14 +2,14 @@ package core
 
 import core.AggBook.{AggBook, AggBookMD}
 import core.MarketData.{GenMD, HasProduct, Sequenced}
-import core.Order.{Buy, Sell, Side}
+import core.Order.{Buy, Fill, Sell, Side}
 import core.Utils.parseProductId
 
-import scala.collection.immutable.TreeMap
+import scala.collection.immutable.{Queue, TreeMap}
 
 case class OrderBook(orders: Map[String, Order] = Map.empty,
-                     asks: TreeMap[Double, Set[Order]] = TreeMap.empty,
-                     bids: TreeMap[Double, Set[Order]] = TreeMap.empty(Ordering.by(-_))) {
+                     asks: TreeMap[Double, Queue[Order]] = TreeMap.empty,
+                     bids: TreeMap[Double, Queue[Order]] = TreeMap.empty(Ordering.by(-_))) {
 
   def isInitialized: Boolean = orders.nonEmpty
 
@@ -48,13 +48,12 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
     orders(id) match {
       case o@Order(_, Sell, _, Some(price)) => copy(
         orders = orders + (id -> o.copy(amount = newSize)),
-        asks = asks + (price -> (asks(price) - o + o.copy(amount = newSize))))
+        asks = asks + (price -> (asks(price).filterNot(_ == o) :+ o.copy(amount = newSize))))
       case o@Order(_, Buy, _, Some(price)) => copy(
         orders = orders + (id -> o.copy(amount = newSize)),
-        bids = bids + (price -> (bids(price) - o + o.copy(amount = newSize))))
+        bids = bids + (price -> (bids(price).filterNot(_ == o) :+ o.copy(amount = newSize))))
     }
   }
-
 
   def spread: Option[Double] = {
     if (asks.nonEmpty && bids.nonEmpty) {
@@ -68,12 +67,41 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
     } else None
   }
 
-  private def addToIndex(idx: TreeMap[Double, Set[Order]], o: Order): TreeMap[Double, Set[Order]] =
-    idx + (o.price.get -> (idx.getOrElse(o.price.get, Set.empty) + o))
+  def fill(side: Side, quantity: Double, limit: Option[Double] = None): (Seq[(Double, Double)], OrderBook) = {
+    val ladder = if (side == Buy) asks else bids
+    // If there is nothing to match against, return.
+    if (ladder.isEmpty) {
+      (Seq.empty, this)
+    } else {
+      val (bestPrice, orderQueue) = ladder.head
+      val isMatch = limit.forall(lim => if (side == Buy) lim >= bestPrice else lim <= bestPrice)
+      if (isMatch) {
+        // If there is a match, generate the fill, and recurse.
+        val topOrder = orderQueue.head
+        val filledQuantity = math.min(quantity, topOrder.amount)
+        val updatedBook =
+          if (filledQuantity == topOrder.amount) this.done(topOrder.id)
+          else this.change(topOrder.id, topOrder.amount - filledQuantity)
+        val remainder = quantity - filledQuantity
+        if (remainder > 0) {
+          val (recursedFills, recursedBook) = updatedBook.fill(side, remainder, limit)
+          ((topOrder.price.get, filledQuantity) +: recursedFills, recursedBook)
+        } else {
+          (Seq((topOrder.price.get, filledQuantity)), updatedBook)
+        }
+      } else {
+        // If no match, do nothing.
+        (Seq.empty, this)
+      }
+    }
+  }
 
-  private def rmFromIndex(idx: TreeMap[Double, Set[Order]], o: Order):
-  TreeMap[Double, Set[Order]] = {
-    val os = idx(o.price.get) - o
+  private def addToIndex(idx: TreeMap[Double, Queue[Order]], o: Order): TreeMap[Double, Queue[Order]] =
+    idx + (o.price.get -> (idx.getOrElse[Queue[Order]](o.price.get, Queue.empty) :+ o))
+
+  private def rmFromIndex(idx: TreeMap[Double, Queue[Order]], o: Order):
+  TreeMap[Double, Queue[Order]] = {
+    val os = idx(o.price.get).filterNot(_ == o)
     if (os.isEmpty) idx - o.price.get else idx + (o.price.get -> os)
   }
 }

@@ -112,7 +112,7 @@ object AggBook {
           case Buy =>
             book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
           case Sell =>
-            book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+            book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
         }
         var remainingSize = size
         var limitExceeded = false

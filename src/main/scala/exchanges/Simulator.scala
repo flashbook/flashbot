@@ -167,6 +167,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
             events :+= OrderDone(order.id, md.product, order.side, Filled, order.price, Some(0))
 
             // Emit the fill
+            println("SIMULATED FILL!!!!!!!!!!!!")
             fills :+= Fill(order.id, Some(md.data.id), makerFee, md.product, order.price.get,
               order.amount, md.micros, Maker, order.side)
           }

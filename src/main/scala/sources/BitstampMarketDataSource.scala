@@ -370,6 +370,7 @@ class BitstampMarketDataSource extends DataSource {
             yield aggbook.copy(data = aggbook.data.convertToTreeMaps)
 
         case (Trades, TimeRange(from, to)) =>
+          println("Streaming trades???", from, to)
           val queue = timeLog[TradeMD](dataDir, parseProductId(topic), "trades")
           queue.scan[Long](from, _.micros, data => data.micros < to) { () =>
             println("closing queue")

@@ -135,9 +135,22 @@ case class FuzzyBook(activeTimeRange: Duration = 1 minute,
     (orderState(id), fe) match {
       case (Unknown, Create) =>
         // Inserting a previously unknown order, this is ok.
+        // First we try to match the incoming order against the book to generate
+        // immediate fills. These fills subtracted from the incoming order and the
+        // associated liquidity is also removed from the book.
+        val (immediateFills, newBook) = orderBook.fill(side.get, amount.get, price)
+        val amountFilled = immediateFills.map(_._2).sum
+
+        if (immediateFills.nonEmpty) {
+          println("IMMEDIATE FILLS")
+          println(immediateFills)
+        }
+
         (Seq.empty, copy(
           latestMicros = math.max(latestMicros, micros),
-          orderBook = orderBook.open(id, price.get, amount.get, side.get),
+          orderBook =
+            if (amountFilled >= amount.get) newBook
+            else newBook.open(id, price.get, amount.get - amountFilled, side.get),
           orderTimestamps = orderTimestamps + (id -> micros)
         ))
       case (Unknown, Change) =>
