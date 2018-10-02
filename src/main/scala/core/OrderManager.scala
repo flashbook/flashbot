@@ -187,7 +187,15 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
                   Nil
               }
           }
-          (copy(targets = newTargetQueue), currentActions.enqueue(actions))
+
+          // Detect if this target was a no-op, and if there are more targets, recurse.
+          // This prevents the target queue from backing up.
+          if (newTargetQueue.nonEmpty && actions.isEmpty) {
+            copy(targets = newTargetQueue)
+              .enqueueActions(exchange, currentActions, balances, prices, hedges)
+          } else {
+            (copy(targets = newTargetQueue), currentActions.enqueue(actions))
+          }
       }
     }
   }

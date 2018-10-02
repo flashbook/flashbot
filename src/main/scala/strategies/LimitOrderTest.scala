@@ -32,8 +32,12 @@ class LimitOrderTest extends Strategy {
   override def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {
     event match {
       case StrategyOrderEvent(targetId, ev) => ev match {
-        case e: OrderOpen => priceToOrderKey += (e.price -> targetId.key)
-        case e: OrderDone => priceToOrderKey -= e.price.get
+        case e: OrderOpen =>
+          println(s"Order open: ${targetId.key} at ${e.price}")
+          priceToOrderKey += (e.price -> targetId.key)
+        case e: OrderDone =>
+          println(s"Order cancel: ${targetId.key} at ${e.price}")
+          priceToOrderKey -= e.price.get
         case _ =>
       }
     }
@@ -59,5 +63,6 @@ class LimitOrderTest extends Strategy {
         priceToOrderKey.getOrElse(price, "") :: quantity.toString :: price.toString :: "" :: Nil
       }
       println(TablePrinter.format(heading +: (askRows ++ bidRows)))
+//      println(priceToOrderKey)
   }
 }
