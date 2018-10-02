@@ -199,7 +199,7 @@ class BinanceMarketDataSource extends DataSource {
               topics.keySet.map(parseProductId),
               (product, t) =>
                 tradeStream ! TradeMD(SRC, product.toString,
-                  Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble)),
+                  Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble, ???)),
               s"${partNum}b"
             )
           ))

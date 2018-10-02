@@ -60,12 +60,12 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
                 }
 
                 val immediateFills =
-                  aggFillOrder(depths(product), side, Some(size), None)
+                  aggFillOrder(depths(product), side, Some(size), None, Some(price))
                   .map { case (fillPrice, fillQuantity) =>
                     Fill(clientOid, Some(clientOid), takerFee, product, fillPrice, fillQuantity,
                       evTime, Taker, side)
                   }
-                fills :+= immediateFills
+                fills ++= immediateFills
 
                 events :+= OrderReceived(clientOid, product, Some(clientOid), Order.Limit)
 
@@ -140,7 +140,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
         // First simulate fills on the aggregate book. Remove the associated liquidity from
         // the depths.
         val simulatedFills =
-          aggFillOrder(depths(md.product), md.data.side, Some(md.data.size), None, None)
+          aggFillOrder(depths(md.product), md.data.side, Some(md.data.size), None)
         simulatedFills.foreach { case (fillPrice, fillAmount) =>
             depths = depths + (md.product -> depths(md.product).updateLevel(
               md.data.side match {
@@ -174,16 +174,17 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
       case _ =>
     }
 
-
     (fills, events)
   }
 
   override def order(req: OrderRequest): Unit = {
     apiRequestQueue = apiRequestQueue.enqueue(OrderReq(currentTimeMicros, req))
+    tick()
   }
 
   override def cancel(id: String, pair: Pair): Unit = {
     apiRequestQueue = apiRequestQueue.enqueue(CancelReq(currentTimeMicros, id, pair))
+    tick()
   }
 
   override def baseAssetPrecision(pair: Pair): Int = base.baseAssetPrecision(pair)

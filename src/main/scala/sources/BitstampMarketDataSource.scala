@@ -217,7 +217,8 @@ object BitstampMarketDataSource {
           root.id.long.getOption(json).get.toString,
           Utils.currentTimeMicros,
           root.price_str.string.getOption(json).get.toDouble,
-          root.amount_str.string.getOption(json).get.toDouble
+          root.amount_str.string.getOption(json).get.toDouble,
+          if (root.`type`.int.getOption(json).get == 0) Buy else Sell
         ))
       }
     })
@@ -259,7 +260,8 @@ object BitstampMarketDataSource {
               tid,
               date.toLong * 1000000 + tid.toLong % 1000000,
               price.toDouble,
-              amount.toDouble
+              amount.toDouble,
+              if (ty.toInt == 0) Buy else Sell
             ))
         }
         backfillTrades.foreach(tradesReceiver ! _)
@@ -364,7 +366,8 @@ class BitstampMarketDataSource extends DataSource {
       case Some(x) => (x, timeRange) match {
         case (DepthBook(depth), TimeRange(from, to)) =>
           val queue = timeLog[AggBookMD](dataDir, parseProductId(topic), s"book_$depth")
-          queue.scan[Long](from, _.micros, data => data.micros < to)(queue.close)
+          for (aggbook <- queue.scan[Long](from, _.micros, data => data.micros < to)(queue.close))
+            yield aggbook.copy(data = aggbook.data.convertToTreeMaps)
 
         case (Trades, TimeRange(from, to)) =>
           val queue = timeLog[TradeMD](dataDir, parseProductId(topic), "trades")

@@ -27,17 +27,21 @@ class LimitOrderTest extends Strategy {
     s"${params.get.exchange}/${params.get.product}/book_10" :: Nil
   }
 
+  override def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {
+    println(event)
+  }
+
   override def handleData(data: MarketData)(implicit ctx: TradingSession): Unit = data match {
     case md: AggBookMD =>
       println(md)
 
-      val asks = md.data.convertToTreeMaps.asks.asInstanceOf[TreeMap[Double, Double]]
-      val bids = md.data.convertToTreeMaps.bids.asInstanceOf[TreeMap[Double, Double]]
+      val asks = md.data.asks.asInstanceOf[TreeMap[Double, Double]]
+      val bids = md.data.bids.asInstanceOf[TreeMap[Double, Double]]
 
       order(params.get.exchange, params.get.product, params.get.order_size,
         price = Some(bids.drop(4).head._1), key = "bid_quote")
 
-      order(params.get.exchange, params.get.product, params.get.order_size,
+      order(params.get.exchange, params.get.product, -params.get.order_size,
         price = Some(asks.drop(4).head._1), key = "ask_quote")
   }
 }

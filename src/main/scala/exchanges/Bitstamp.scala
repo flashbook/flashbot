@@ -9,8 +9,7 @@ class Bitstamp(params: Json)(implicit val system: ActorSystem,
                              val mat: ActorMaterializer) extends Exchange {
   override def makerFee: Double = .0005
 
-//  override def takerFee: Double = .0005
-  override def takerFee: Double = -.00025
+  override def takerFee: Double = .0005
 
   override def order(req: OrderRequest): Unit = ???
 

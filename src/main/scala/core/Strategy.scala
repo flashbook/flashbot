@@ -48,13 +48,15 @@ abstract class Strategy {
                        ratio: Double,
                        key: String = DEFAULT,
                        price: Option[Double] = None,
-                       scope: Scope = PairScope)
+                       scope: Scope = PairScope,
+                       postOnly: Boolean = false)
                       (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
       TargetId(parseProductId(product), key),
       Ratio(ratio, scope),
-      price
+      price,
+      postOnly
     ))
   }
 
@@ -62,13 +64,15 @@ abstract class Strategy {
             product: String,
             amount: Double,
             key: String = DEFAULT,
-            price: Option[Double] = None)
+            price: Option[Double] = None,
+            postOnly: Boolean = false)
            (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
       TargetId(parseProductId(product), key),
       Amount(amount),
-      price
+      price,
+      postOnly
     ))
   }
 
@@ -76,13 +80,15 @@ abstract class Strategy {
                     product: String,
                     funds: Double,
                     key: String = DEFAULT,
-                    price: Option[Double] = None)
+                    price: Option[Double] = None,
+                    postOnly: Boolean = false)
                    (implicit ctx: TradingSession): Unit = {
     ctx.handleEvents(OrderTarget(
       exchangeName,
       TargetId(parseProductId(product), key),
       Funds(funds),
-      None
+      None,
+      postOnly
     ))
   }
 

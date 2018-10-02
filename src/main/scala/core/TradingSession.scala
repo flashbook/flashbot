@@ -225,14 +225,15 @@ object TradingSession {
             val instance: Exchange = classOpt.get.getConstructor(
               classOf[Json], classOf[ActorSystem], classOf[ActorMaterializer])
               .newInstance(exchangeConfigs(srcKey).params, system, mat)
-            instance.setTickFn(() => {
+            val finalTickInstance =
+              if (mode == Live) instance
+              else new Simulator(instance)
+            finalTickInstance.setTickFn(() => {
               tickRefOpt.foreach { ref =>
                 ref ! Tick(srcKey)
               }
             })
-            exchanges = exchanges + (srcKey -> (
-              if (mode == Live) instance
-              else new Simulator(instance)))
+            exchanges = exchanges + (srcKey -> finalTickInstance)
           } catch {
             case err: Throwable =>
               return Left(EngineError(s"Exchange instantiation error: $srcKey", err))

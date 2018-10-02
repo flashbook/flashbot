@@ -24,7 +24,9 @@ abstract class Exchange {
 
   def useFundsForMarketBuys: Boolean = false
 
-  var tick: () => Unit = () => {}
+  var tick: () => Unit = () => {
+    throw new RuntimeException("The default tick function should never be called")
+  }
   def setTickFn(fn: () => Unit): Unit = {
     tick = fn
   }

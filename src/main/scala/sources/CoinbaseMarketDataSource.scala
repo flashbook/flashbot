@@ -11,7 +11,7 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Sink, Source}
 import core._
-import core.Order.{OrderType, Side}
+import core.Order.{Buy, OrderType, Sell, Side}
 import core.OrderBook.{OrderBookMD, SnapshotOrder}
 import core.Utils.{ISO8601ToMicros, parseJson, parseProductId}
 import data.OrderBookProvider.Subscribe
@@ -78,9 +78,12 @@ class CoinbaseMarketDataSource extends DataSource {
           // Persist trades separately. Derived from the same order book stream.
           if (dts.isDefinedAt(Trades)) {
             rawEvent.toOrderEvent match {
-              case OrderMatch(tradeId, product, time, size, price, _, _, _) =>
+              case OrderMatch(tradeId, product, time, size, price, side, _, _) =>
                 tradesQueue.enqueue(TradeMD(NAME, product.toString,
-                  Trade(tradeId.toString, time, price, size)))
+                  Trade(tradeId.toString, time, price, size, side match {
+                    case Buy => Sell
+                    case Sell => Buy
+                  })))
               case _ =>
             }
           }
