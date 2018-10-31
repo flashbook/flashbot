@@ -228,7 +228,10 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
   }
 
   def orderComplete(actualId: String): OrderManager = {
-    copy(ids = ids.orderIdComplete(actualId))
+    copy(
+      mountedTargets = mountedTargets - ids.actualToTarget(actualId),
+      ids = ids.orderIdComplete(actualId)
+    )
   }
 }
 

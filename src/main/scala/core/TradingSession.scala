@@ -19,6 +19,7 @@ import exchanges.Simulator
 import io.circe.Json
 
 import scala.collection.immutable.Queue
+import scala.collection.mutable
 import scala.concurrent.forkjoin.ForkJoinPool
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
@@ -280,7 +281,8 @@ object TradingSession {
                            actionQueues: Map[String, ActionQueue] = markets
                              .mapValues(_ => ActionQueue()),
 
-                           emittedReportEvents: Seq[ReportEvent] = Seq.empty)
+                           emittedReportEvents: Seq[ReportEvent] = Seq.empty,
+                           hedges: mutable.Map[String, Double] = mutable.Map.empty)
 
           extends TradingSession {
 
@@ -291,8 +293,6 @@ object TradingSession {
 
           private var targets = Queue.empty[OrderTarget]
           private var reportEvents = Queue.empty[ReportEvent]
-
-          var hedges = Map.empty[String, Double]
 
           def handleEvent(event: TradingSession.Event): Unit = {
             currentStrategySeqNr match {
@@ -386,8 +386,8 @@ object TradingSession {
             case md: MarketData => Left(md)
             case tick: Tick => Right(tick)
           }
-          .scan(Session()) { case (session@Session(
-              seqNr, balances, prices, oms, actions, _), dataOrTick) =>
+          .scan(Session()) { case (session @ Session(
+              seqNr, balances, prices, oms, actions, _, hedges), dataOrTick) =>
 
             implicit val ctx: TradingSession = session
 
@@ -551,7 +551,7 @@ object TradingSession {
                     .map { case (acc, value) => (acc.currency, value) },
                   newPrices.filter(_._1.exchange == exName)
                     .map { case (market, value) => (market.product, value) },
-                  sessionInstance.hedges
+                  hedges.toMap
                 ) match {
                   case (_om, _actions) =>
                     newOMs += (exName -> _om)
@@ -602,11 +602,9 @@ object TradingSession {
 
         fut.onComplete {
           case Success(_) =>
-            println("YOOOO")
             log.info("session success")
             sessionEventsRef ! PoisonPill
           case Failure(err) =>
-            println("YOOOO HELLLOOOO")
             log.error(err, "session failed")
             sessionEventsRef ! PoisonPill
         }
