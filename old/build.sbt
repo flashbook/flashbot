@@ -1,183 +1,86 @@
+import sbt.Keys._
+import sbt.Project.projectToRef
 
-import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+// a special crossProject for configuring a JS/JVM/shared structure
+lazy val shared = (crossProject.crossType(CrossType.Pure) in file("shared"))
+  .settings(
+    scalaVersion := Settings.versions.scala,
+    libraryDependencies ++= Settings.sharedDependencies.value
+  )
+  // set up settings specific to the JS project
+  .jsConfigure(_ enablePlugins ScalaJSWeb)
 
-//enablePlugins(JvmPlugin)
+lazy val sharedJVM = shared.jvm.settings(name := "sharedJVM")
 
-lazy val sharedSettings = Seq(
-  name := "flashbot",
-  organization := "io.flashbook",
-  version := "0.1-SNAPSHOT",
-  scalaVersion := "2.11.8",
-  resolvers += Resolver.sonatypeRepo("snapshots")
-)
+lazy val sharedJS = shared.js.settings(name := "sharedJS")
 
-lazy val akkaVersion = "2.5.11"
-lazy val akkaHttpVersion = "10.1.0"
-lazy val circeVersion = "0.9.0"
+// use eliding to drop some debug code in the production build
+lazy val elideOptions = settingKey[Seq[String]]("Set limit for elidable functions")
 
-lazy val networkDeps = List(
-  // Akka libs
-  "com.typesafe.akka" %% "akka-actor" % akkaVersion,
-  "com.typesafe.akka" %% "akka-stream" % akkaVersion,
-  "com.typesafe.akka" %% "akka-http" % akkaHttpVersion,
-  "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpVersion % Test,
+// instantiate the JS project for SBT with some additional settings
+lazy val client: Project = (project in file("client"))
+  .settings(
+    name := "client",
+    version := Settings.version,
+    scalaVersion := Settings.versions.scala,
+    scalacOptions ++= Settings.scalacOptions,
+    libraryDependencies ++= Settings.scalajsDependencies.value,
+    // by default we do development build, no eliding
+    elideOptions := Seq(),
+    scalacOptions ++= elideOptions.value,
+    jsDependencies ++= Settings.jsDependencies.value,
+    // RuntimeDOM is needed for tests
+    jsDependencies += RuntimeDOM % "test",
+    // yes, we want to package JS dependencies
+    skip in packageJSDependencies := false,
+    // use Scala.js provided launcher code to start the client app
+    scalaJSUseMainModuleInitializer := true,
+    scalaJSUseMainModuleInitializer in Test := false,
+    // use uTest framework for tests
+    testFrameworks += new TestFramework("utest.runner.Framework")
+  )
+  .enablePlugins(ScalaJSPlugin, ScalaJSWeb)
+  .dependsOn(sharedJS)
 
-  // CORS
-  "ch.megard" %% "akka-http-cors" % "0.3.0",
+// Client projects (just one in this case)
+lazy val clients = Seq(client)
 
-  // Persistent storage
-  "com.typesafe.akka" %% "akka-persistence" % akkaVersion,
-  "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8",
+// instantiate the JVM project for SBT with some additional settings
+lazy val server = (project in file("server"))
+  .settings(
+    name := "server",
+    version := Settings.version,
+    scalaVersion := Settings.versions.scala,
+    scalacOptions ++= Settings.scalacOptions,
+    libraryDependencies ++= Settings.jvmDependencies.value,
+    commands += ReleaseCmd,
+    // triggers scalaJSPipeline when using compile or continuous compilation
+    compile in Compile := ((compile in Compile) dependsOn scalaJSPipeline).value,
+    // connect to the client project
+    scalaJSProjects := clients,
+    pipelineStages in Assets := Seq(scalaJSPipeline),
+    pipelineStages := Seq(digest, gzip),
+    // compress CSS
+    LessKeys.compress in Assets := true
+  )
+  .enablePlugins(PlayScala)
+  .disablePlugins(PlayLayoutPlugin) // use the standard directory layout instead of Play's custom
+  .aggregate(clients.map(projectToRef): _*)
+  .dependsOn(sharedJVM)
 
-//  "com.github.andyglow" %% "websocket-scala-client" % "0.2.4" % Compile,
-  "org.java-websocket" % "Java-WebSocket" % "1.3.8",
+// Command for building a release
+lazy val ReleaseCmd = Command.command("release") {
+  state => "set elideOptions in client := Seq(\"-Xelide-below\", \"WARNING\")" ::
+    "client/clean" ::
+    "client/test" ::
+    "server/clean" ::
+    "server/test" ::
+    "server/dist" ::
+    "set elideOptions in client := Seq()" ::
+    state
+}
 
-  "de.heikoseeberger" %% "akka-http-circe" % "1.20.0",
+// lazy val root = (project in file(".")).aggregate(client, server)
 
-  // Pusher
-  "com.pusher" % "pusher-java-client" % "1.8.1"
-)
-
-lazy val testDeps = List(
-  "org.scalactic" %% "scalactic" % "3.0.5",
-  "org.scalatest" %% "scalatest" % "3.0.5" % "test"
-)
-
-lazy val graphQLDeps = List(
-  "org.sangria-graphql" %% "sangria" % "1.4.0",
-  "org.sangria-graphql" %% "sangria-circe" % "1.2.1",
-  "org.sangria-graphql" %% "sangria-akka-streams" % "1.0.0"
-)
-
-lazy val jsonDeps = List(
-  "io.circe" %% "circe-core" % circeVersion,
-  "io.circe" %% "circe-generic" % circeVersion,
-  "io.circe" %% "circe-parser" % circeVersion,
-  "io.circe" %% "circe-optics" % circeVersion,
-  "io.circe" %% "circe-literal" % circeVersion
-)
-
-lazy val dataStores = List(
-  "net.openhft" % "chronicle-queue" % "4.6.99",
-  "net.openhft" % "chronicle-map" % "3.14.5"
-)
-
-lazy val serviceDeps = List(
-  "com.github.scopt" % "scopt_2.11" % "3.7.0",
-  "com.typesafe" % "config" % "1.3.2" % Compile,
-  // Metrics with prometheus
-  "io.prometheus" % "simpleclient" % "0.3.0",
-  "io.prometheus" % "simpleclient_httpserver" % "0.3.0"
-)
-
-lazy val timeSeriesDeps = List(
-  "org.ta4j" % "ta4j-core" % "0.12"
-)
-
-lazy val miscDeps = List(
-  // Reflection utility for discovering classes that implement an interface.
-  "org.clapper" %% "classutil" % "1.1.2",
-  "ai.x" %% "diff" % "1.2.0",
-  "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
-  "com.lihaoyi" %% "fansi" % "0.2.5"
-)
-
-lazy val statsDeps = List(
-  "org.la4j" % "la4j" % "0.6.0"
-)
-
-lazy val root = project.in(file("."))
-  .settings(sharedSettings: _*)
-  .settings(assemblyJarName in assembly := "flashbot.jar")
-  .settings(assemblyMergeStrategy in assembly := (x => {
-    val defaultStrategy = (assemblyMergeStrategy in assembly).value
-    val orig = defaultStrategy(x)
-    orig match {
-      case MergeStrategy.deduplicate => MergeStrategy.first // scary
-      case other => other
-    }
-  }))
-  .settings(libraryDependencies ++= (serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLDeps ++
-    dataStores ++ timeSeriesDeps ++ testDeps ++ miscDeps ++ statsDeps))
-
-
-// Hack to stop SBT from complaining
-// https://github.com/sbt/sbt/issues/3618
-// Relevant to the jax rs ws dependency of xchange libraries
-// All that mess is commented out for now anyway
-//
-//val workaround = {
-//  sys.props += ("packaging.type" -> "jar")
-//  ()
-//}
-//lazy val marketDataDeps = List(
-//  "info.bitrich.xchange-stream" % "xchange-stream-core" % "4.3.2" % Compile,
-//  "info.bitrich.xchange-stream" % "xchange-gdax" % "4.3.2" % Compile
-//)
-
-
-
-
-
-
-
-
-//lazy val server = project
-//  .in(file("server"))
-//  .settings(sharedSettings: _*)
-//  .settings(name := "flashbot-server")
-//  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-//    dataStores ++ testDeps))
-//  .dependsOn(common)
-//  .aggregate(common)
-//
-
-//lazy val ui = project
-//  .in(file("ui"))
-//  .settings(sharedSettings: _*)
-//  .settings(name := "doomsday-ui")
-//  .settings(mainClass in Compile := Some("ui.Main"))
-//  .settings(scalaJSUseMainModuleInitializer in Compile := true)
-//  .enablePlugins(ScalaJSPlugin, ScalaJSBundlerPlugin)
-//    .settings(npmDependencies in Compile ++= Seq(
-//      "react" -> "16.2.0",
-//      "react-dom" -> "16.2.0"
-//    ))
-//  .dependsOn(common)
-//  .aggregate(common)
-
-//lazy val common = project
-//  .in(file("common"))
-//  .settings(sharedSettings: _*)
-//  .settings(name := "flashbot-common")
-//  .settings(libraryDependencies ++= (serviceDeps ++ akkaDeps ++ jsonDeps ++ graphQLDeps ++
-//    dataStores ++ testDeps))
-
-//lazy val root = project.in(file("."))
-//    .aggregate(doomsdayJS, doomsdayJVM)
-//    .settings(
-//      publish := {},
-//      publishLocal := {}
-//    )
-
-//lazy val doomsday = crossProject.in(file("."))
-//  .settings(
-//    name := "doomsday",
-//    version := "0.1-SNAPSHOT"
-////    scalaJSUseMainModuleInitializer := true
-//  )
-//  .jvmSettings(
-//    libraryDependencies ++= (akkaDeps ++ Seq(
-//      "org.scalactic" %% "scalactic" % "3.0.5",
-//      "org.scalatest" %% "scalatest" % "3.0.5" % "test",
-//      "org.sangria-graphql" %% "sangria" % "1.4.0"
-//    ))
-//  )
-//    .jvmSettings(moduleName := "jvm")
-//  .jsSettings(
-//    libraryDependencies += "org.scala-js" %%% "scalajs-dom" % "0.9.1"
-//  )
-//  .jsSettings(moduleName := "js")
-
-//lazy val doomsdayJS = doomsday.js
-//lazy val doomsdayJVM = doomsday.jvm
+// loads the Play server project at sbt startup
+onLoad in Global := (Command.process("project server", _: State)) compose (onLoad in Global).value
