@@ -20,6 +20,10 @@
     "bitstamp": {
       "class": "exchanges.Bitstamp",
       "params": {}
+    },
+    "bitfinex": {
+      "class": "exchanges.Bitfinex",
+      "params": {}
     }
   },
 
@@ -464,6 +468,22 @@
       }
     },
 
+    "bitfinex": {
+      "class": "sources.BitfinexMarketDataSource",
+      "topics": {
+        "eth_usd": {},
+        "btc_usd": {},
+        "ltc_usd": {},
+        "ltc_btc": {},
+        "xrp_btc": {}
+      },
+      "data_types": {
+        "trades": {
+          "retention": "90d"
+        }
+      }
+    },
+
     "twitter": {
       "class": "sources.TwitterSearchDataSource",
       "topics": {
@@ -497,7 +517,8 @@
     "secret_b": "strategies.SecretB",
     "secret_c": "strategies.SecretC",
     "secret_d": "strategies.SecretD",
-    "limit_test": "strategies.LimitOrderTest"
+    "limit_test": "strategies.LimitOrderTest",
+    "hanek_strat": "strategies.HanekStrat"
   },
 
   "currencies": {

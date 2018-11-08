@@ -136,7 +136,6 @@ class TradingEngine(dataDir: String,
           }
         } catch {
           case err: Throwable =>
-            println("ERRRRRRRRROR", err)
             throw err
         }
       } catch {

@@ -136,7 +136,7 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
                   ))
 
                 case None =>
-                  println("WARNING: Dropping empty market order", ot)
+//                  println("WARNING: Dropping empty market order", ot)
                   Nil
               }
 

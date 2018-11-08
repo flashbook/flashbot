@@ -69,7 +69,7 @@ lazy val serviceDeps = List(
 )
 
 lazy val timeSeriesDeps = List(
-  "org.ta4j" % "ta4j-core" % "0.12-SNAPSHOT"
+  "org.ta4j" % "ta4j-core" % "0.12"
 )
 
 lazy val miscDeps = List(

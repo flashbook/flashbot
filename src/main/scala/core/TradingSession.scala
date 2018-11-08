@@ -503,7 +503,7 @@ object TradingSession {
                 val rb = ret(acc(base))
                 val rq = ret(acc(quote))
                 val t = Utils.formatDate(new Date(micros / 1000))
-//                println(s"emitting balance event for ($base, $quote) ($rb, $rq) at $t")
+
                 emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), micros))
                 emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), micros))
 
@@ -525,7 +525,7 @@ object TradingSession {
                   strategy.handleData(md)(sessionInstance)
                 } catch {
                   case e: Throwable =>
-                    println(e.getMessage)
+                    e.printStackTrace()
                 }
                 currentStrategySeqNr = None
               case None =>
