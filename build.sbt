@@ -1,5 +1,7 @@
 
-enablePlugins(JvmPlugin)
+import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+
+//enablePlugins(JvmPlugin)
 
 lazy val sharedSettings = Seq(
   name := "flashbot",
