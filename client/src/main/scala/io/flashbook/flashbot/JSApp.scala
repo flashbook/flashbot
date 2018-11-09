@@ -19,5 +19,4 @@ object JSApp {
     val yo = FooComp(name = "haha yeeee!!!!")
     ReactDOM.render(yo, root)
   }
-
 }
