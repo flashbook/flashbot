@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="sbt: com.github.japgolly.scalacss:ext-react_sjs0.6_2.11:0.5.3:jar">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/.ivy2/cache/com.github.japgolly.scalacss/ext-react_sjs0.6_2.11/jars/ext-react_sjs0.6_2.11-0.5.3.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES>
+      <root url="jar://$USER_HOME$/.ivy2/cache/com.github.japgolly.scalacss/ext-react_sjs0.6_2.11/srcs/ext-react_sjs0.6_2.11-0.5.3-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>
