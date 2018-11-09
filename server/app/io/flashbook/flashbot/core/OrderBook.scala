@@ -1,6 +1,6 @@
 package io.flashbook.flashbot.core
 
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD}
+import io.flashbook.flashbot.core.AggBook.AggBookMD
 import io.flashbook.flashbot.core.MarketData.{GenMD, HasProduct, Sequenced}
 import io.flashbook.flashbot.core.Order.{Buy, Fill, Sell, Side}
 import io.flashbook.flashbot.core.Utils.parseProductId

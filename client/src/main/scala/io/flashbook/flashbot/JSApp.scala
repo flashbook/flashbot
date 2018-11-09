@@ -16,7 +16,7 @@ object JSApp {
 
   def main(args: Array[String]): Unit = {
     val root = dom.document.getElementById("scalajsShoutOut")
-    val yo = FooComp(name = "haha yoah!!!!")
+    val yo = FooComp(name = "haha yeeee!!!!")
     ReactDOM.render(yo, root)
   }
 

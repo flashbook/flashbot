@@ -132,7 +132,7 @@ lazy val statsDeps = List(
 lazy val commonSettings = Seq(
   scalaVersion := "2.12.5",
   organization := "io.flashbook",
-  libraryDependencies ++= (jsonDeps)
+  libraryDependencies ++= jsonDeps
 )
 
 // loads the server project at sbt startup
