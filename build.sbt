@@ -1,7 +1,7 @@
 import sbtcrossproject.{crossProject, CrossType}
 
-scalacOptions += "-P:scalajs:sjsDefinedByDefault"
-addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)
+//scalacOptions += "-P:scalajs:sjsDefinedByDefault"
+//addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)
 
 lazy val server = (project in file("server")).settings(commonSettings).settings(
   scalaJSProjects := Seq(client),
@@ -29,12 +29,10 @@ lazy val client = (project in file("client")).settings(commonSettings).settings(
   scalaJSUseMainModuleInitializer := true,
   libraryDependencies ++= Seq(
     "org.scala-js" %%% "scalajs-dom" % "0.9.5",
-
+    "com.apollographql" %%% "apollo-scalajs-react" % "0.4.3",
     "me.shadaj" %%% "slinky-core" % "0.5.1", // core React functionality, no React DOM
     "me.shadaj" %%% "slinky-web" % "0.5.1", // React DOM, HTML and SVG tags
     "me.shadaj" %%% "slinky-hot" % "0.5.1", // Hot loading, requires react-proxy package
-
-    "com.apollographql" %%% "apollo-scalajs-react" % "0.4.3"
   ),
   scalacOptions += "-P:scalajs:sjsDefinedByDefault",
   addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full),
@@ -48,6 +46,13 @@ lazy val client = (project in file("client")).settings(commonSettings).settings(
     "react-apollo" -> "2.2.2",
     "graphql-tag" -> "2.9.2",
     "graphql" -> "14.0.2"
+  ),
+  npmDevDependencies in Compile ++= Seq(
+    "file-loader" -> "1.1.5",
+    "style-loader" -> "0.19.0",
+    "css-loader" -> "0.28.7",
+    "html-webpack-plugin" -> "2.30.1",
+    "copy-webpack-plugin" -> "4.2.0"
   )
 ).enablePlugins(ScalaJSPlugin, ScalaJSBundlerPlugin, ScalaJSWeb).
   dependsOn(sharedJs)

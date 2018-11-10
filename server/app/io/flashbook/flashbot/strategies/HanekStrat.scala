@@ -5,9 +5,10 @@ import java.time.{Instant, LocalDateTime, ZoneOffset}
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.core.Order.{Buy, Sell}
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.Utils.parseProductId
+import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.{RSIIndicator, SMAIndicator, StochasticOscillatorDIndicator, StochasticOscillatorKIndicator}
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 import org.ta4j.core.indicators.statistics.{SimpleLinearRegressionIndicator, StandardDeviationIndicator}
@@ -34,7 +35,7 @@ class HanekStrat extends Strategy {
     * Indicators
     */
   private lazy val tsg = new TimeSeriesGroup("1h")
-  private def pair = parseProductId(params.get.pair.toLowerCase)
+  private def pair = util.parseProductId(params.get.pair.toLowerCase)
   private def price = tsg.get("bitfinex", pair)
   private lazy val close = new ClosePriceIndicator(price.get)
   private lazy val rsi = new RSIIndicator(close, 10)
@@ -265,7 +266,7 @@ class HanekStrat extends Strategy {
 
   override def resolveAddress(address: Address): Option[Iterator[MarketData]] = address match {
     case Address("bitfinex", product, "candles_1h") =>
-      val pair = Utils.parseProductId(product)
+      val pair = util.parseProductId(product)
       val pairStr = (pair.base + pair.quote).toUpperCase
       val it = Source
         .fromInputStream(getClass.getResourceAsStream("/data/" +

@@ -1,10 +1,11 @@
 package io.flashbook.flashbot.core
 
 import io.circe.Json
-import io.flashbook.flashbot.core.Utils.parseProductId
+import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
-import io.flashbook.flashbot.core.Report.{TimeSeriesCandle, TimeSeriesEvent}
-import io.flashbook.flashbot.core.TradingSession._
+import io.flashbook.flashbot.engine.TradingSession._
+import io.flashbook.flashbot.engine.TradingSession
+import io.flashbook.flashbot.report._
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -42,6 +43,25 @@ abstract class Strategy {
     * Receives events that occur in the system as a result of actions taken in this strategy.
     */
   def handleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit = {}
+
+  /**
+    * Receives commands that occur from outside of the system, such as from the UI or API.
+    */
+  def handleCommand(command: StrategyCommand)(implicit ctx: TradingSession): Unit = {}
+
+  def putValue[T <: ReportValue[T]](key: String, value: T)(implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SessionReportEvent(PutValueEvent(key, value)))
+  }
+
+  def updateValue[T <: CanDeltaUpdate](key: String, value: T)
+                                      (delta: value.Delta)
+                                      (implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SessionReportEvent(UpdateValueEvent(key, value.deltaEncoder(delta))))
+  }
+
+  def removeValue(key: String)(implicit ctx: TradingSession): Unit = {
+    ctx.handleEvents(SessionReportEvent(RemoveValueEvent(key)))
+  }
 
   def orderTargetRatio(exchangeName: String,
                        product: String,

@@ -1,5 +1,7 @@
 package io.flashbook.flashbot.core
 
+import io.flashbook.flashbot.util.time.parseDuration
+
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import io.circe.Json
@@ -51,7 +53,7 @@ object DataSource {
   def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
     case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
-    case "candles" :: d :: Nil => Some(Candles(Utils.parseDuration(d)))
+    case "candles" :: d :: Nil => Some(Candles(parseDuration(d)))
     case "trades" :: Nil => Some(Trades)
     case "tickers" :: Nil => Some(Tickers)
     case _ => None

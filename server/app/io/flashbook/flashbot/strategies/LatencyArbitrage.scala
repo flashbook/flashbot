@@ -1,8 +1,9 @@
 package io.flashbook.flashbot.strategies
 
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
-import io.flashbook.flashbot.core.{Account, MarketData, Strategy, TradingSession}
+import io.flashbook.flashbot.core.{Account, MarketData, Strategy}
 import io.circe.Json
+import io.flashbook.flashbot.engine.TradingSession
 
 class LatencyArbitrage extends Strategy {
   override def title: String = "Latency Arbitrage"

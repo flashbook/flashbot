@@ -10,15 +10,14 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import io.flashbook.flashbot.core.AggBook._
-import io.flashbook.flashbot.core.{AggBook => _, _}
-import io.flashbook.flashbot.core.{Ask, Bid, DataSource, MarketData, Pair, Timestamped, Utils}
-import io.flashbook.flashbot.core.Utils.{initResource, parseProductId}
+import io.flashbook.flashbot.core.{Ask, Bid, DataSource, MarketData, Pair, Timestamped, AggBook => _, _}
+import io.flashbook.flashbot.util
 import io.flashbook.flashbot.core.DataSource._
-import io.flashbook.flashbot.data.TimeLog
-import io.flashbook.flashbot.data.TimeLog.TimeLog
+import io.flashbook.flashbot.engine.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
+import io.flashbook.flashbot.engine.TimeLog
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
@@ -49,7 +48,7 @@ class CryptopiaDataSource extends DataSource {
           case (batch, queue) =>
             fetchOrders(batch.map(p => Pair(p.Symbol, p.BaseSymbol))) onComplete {
               case Success(orders) =>
-                val micros = Utils.currentTimeMicros
+                val micros = util.time.currentTimeMicros
                 orders.foreach(ordersRef ! (_, micros))
               case Failure(err) =>
                 log.error(err, "Failure fetching orders from Cryptopia API")
@@ -128,7 +127,7 @@ class CryptopiaDataSource extends DataSource {
       .actorRef(Int.MaxValue, OverflowStrategy.fail)
       .via(Flow[(Orders, Long)].map(a => ordersToAggBookMD(a._1, a._2)))
       .groupBy(10000, _.product)
-      .via(initResource(md =>
+      .via(util.stream.initResource(md =>
         timeLog[AggBookMD](dataDir, md.product, md.dataType)))
       .to(Sink.foreach {
         case (timeLog, book) =>
@@ -148,9 +147,8 @@ class CryptopiaDataSource extends DataSource {
                       timeRange: TimeRange): Iterator[MarketData] = {
     parseBuiltInDataType(dataType) match {
       case Some(DepthBook(BOOK_DEPTH)) =>
-        var tl: TimeLog[AggBookMD] = timeLog[AggBookMD](dataDir, parseProductId(topic), dataType)
-        val it = tl.scan[Long](timeRange.from, _.micros, md => md.micros < timeRange.to)()
-        for (item <- it) yield item.copy(data = item.data.convertToTreeMaps)
+        var tl: TimeLog[AggBookMD] = timeLog[AggBookMD](dataDir, util.parseProductId(topic), dataType)
+        tl.scan[Long](timeRange.from, _.micros, md => md.micros < timeRange.to)()
     }
   }
 

@@ -1,6 +1,6 @@
 package io.flashbook.flashbot.exchanges
 
-import io.flashbook.flashbot.core.{Exchange, MarketData, Order, OrderEvent, OrderRequest, Pair, TradingSession}
+import io.flashbook.flashbot.core.{Exchange, MarketData, Order, OrderEvent, OrderRequest, Pair}
 
 class GDAX extends Exchange {
   override val makerFee = .0 // nice

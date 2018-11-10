@@ -2,34 +2,34 @@
   "api_key": "",
   "exchanges": {
     "gdax": {
-      "class": "exchanges.GDAX",
+      "class": "io.flashbook.flashbot.exchanges.GDAX",
       "params": {}
     },
     "binance": {
-      "class": "exchanges.Binance",
+      "class": "io.flashbook.flashbot.exchanges.Binance",
       "params": {}
     },
     "bitmex": {
-      "class": "exchanges.BitMEX",
+      "class": "io.flashbook.flashbot.exchanges.BitMEX",
       "params": {}
     },
     "cryptopia": {
-      "class": "exchanges.Cryptopia",
+      "class": "io.flashbook.flashbot.exchanges.Cryptopia",
       "params": {}
     },
     "bitstamp": {
-      "class": "exchanges.Bitstamp",
+      "class": "io.flashbook.flashbot.exchanges.Bitstamp",
       "params": {}
     },
     "bitfinex": {
-      "class": "exchanges.Bitfinex",
+      "class": "io.flashbook.flashbot.exchanges.Bitfinex",
       "params": {}
     }
   },
 
   "data_sources": {
     "coinbase": {
-      "class": "sources.CoinbaseMarketDataSource",
+      "class": "io.flashbook.flashbot.sources.CoinbaseMarketDataSource",
       "topics": {
         "btc_usd": {},
         "ltc_usd": {},
@@ -48,7 +48,7 @@
     },
 
     "binance": {
-      "class": "sources.BinanceMarketDataSource",
+      "class": "io.flashbook.flashbot.sources.BinanceMarketDataSource",
       "topics": {
         "btc_usdt": {},
         "eos_usdt": {},
@@ -433,7 +433,7 @@
     },
 
     "cryptopia": {
-      "class": "sources.CryptopiaDataSource",
+      "class": "io.flashbook.flashbot.sources.CryptopiaDataSource",
       "topics": {
         "*": {}
       },
@@ -469,7 +469,7 @@
     },
 
     "bitfinex": {
-      "class": "sources.BitfinexMarketDataSource",
+      "class": "io.flashbook.flashbot.sources.BitfinexMarketDataSource",
       "topics": {
         "eth_usd": {},
         "btc_usd": {},
@@ -485,7 +485,7 @@
     },
 
     "twitter": {
-      "class": "sources.TwitterSearchDataSource",
+      "class": "io.flashbook.flashbot.sources.TwitterSearchDataSource",
       "topics": {
         "btc": {
           "search_terms": ["btc", "#btc", "bitcoin", "#bitcoin", "$btc"]
@@ -506,19 +506,19 @@
   },
 
   "strategies": {
-    "dmac": "strategies.DualMovingAverageCrossover",
-    "tema": "strategies.TEMACrossover",
-    "scalper": "strategies.Scalper",
-    "signal": "strategies.ExternalSignal",
-    "latency_arb": "strategies.LatencyArbitrage",
-    "twitter_vol": "strategies.TwitterVolumeTrader",
-    "random": "strategies.OrderRandomly",
-    "secret_a": "strategies.SecretA",
-    "secret_b": "strategies.SecretB",
-    "secret_c": "strategies.SecretC",
-    "secret_d": "strategies.SecretD",
-    "limit_test": "strategies.LimitOrderTest",
-    "hanek_strat": "strategies.HanekStrat"
+    "dmac": "io.flashbook.flashbot.strategies.DualMovingAverageCrossover",
+    "tema": "io.flashbook.flashbot.strategies.TEMACrossover",
+    "scalper": "io.flashbook.flashbot.strategies.Scalper",
+    "signal": "io.flashbook.flashbot.strategies.ExternalSignal",
+    "latency_arb": "io.flashbook.flashbot.strategies.LatencyArbitrage",
+    "twitter_vol": "io.flashbook.flashbot.strategies.TwitterVolumeTrader",
+    "random": "io.flashbook.flashbot.strategies.OrderRandomly",
+    "secret_a": "io.flashbook.flashbot.strategies.SecretA",
+    "secret_b": "io.flashbook.flashbot.strategies.SecretB",
+    "secret_c": "io.flashbook.flashbot.strategies.SecretC",
+    "secret_d": "io.flashbook.flashbot.strategies.SecretD",
+    "limit_test": "io.flashbook.flashbot.strategies.LimitOrderTest",
+    "hanek_strat": "io.flashbook.flashbot.strategies.HanekStrat"
   },
 
   "currencies": {

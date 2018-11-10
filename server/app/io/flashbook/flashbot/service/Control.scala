@@ -1,6 +1,5 @@
 package io.flashbook.flashbot.service
 
-import io.flashbook.flashbot.core.{TradingEngine, Utils}
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.stream.Materializer
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
@@ -10,7 +9,9 @@ import play.api.inject.ApplicationLifecycle
 import io.circe.Json
 import io.circe.parser.parse
 import io.circe.generic.auto._
-import io.flashbook.flashbot.data.IngestService
+import io.flashbook.flashbot.engine.TradingEngine.StartEngine
+import io.flashbook.flashbot.engine.{IngestService, TradingEngine}
+import io.flashbook.flashbot.util.stream.buildMaterializer
 
 import scala.concurrent.{ExecutionContext, Future, SyncVar}
 import scala.collection.JavaConverters._
@@ -70,7 +71,7 @@ object Control {
       system.put(ActorSystem("flashbot", systemConfig))
     }
     implicit val sys = system.get
-    implicit val mat: Materializer = Utils.buildMaterializer
+    implicit val mat: Materializer = buildMaterializer
     implicit val ec: ExecutionContext = sys.dispatcher
 
     // Start the TradingEngine
@@ -85,12 +86,13 @@ object Control {
           )),
         "trading-engine"
       ))
+      engine.get ! StartEngine
     } else {
       println("Warning: Flashbot engine already started.")
     }
 
     // Start the data ingest
-    finalDataSources.foreach(srcName => {
+    finalDataSources.keySet.foreach(srcName => {
       val actor = sys.actorOf(Props[IngestService], s"ingest:$srcName")
       actor ! (
         srcName,

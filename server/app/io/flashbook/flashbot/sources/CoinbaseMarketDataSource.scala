@@ -10,16 +10,16 @@ import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Sink, Source}
-import io.flashbook.flashbot.core._
+import io.flashbook.flashbot.core.{DataSource, _}
 import io.flashbook.flashbot.core.Order.{Buy, OrderType, Sell, Side}
 import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
-import io.flashbook.flashbot.core.Utils.{ISO8601ToMicros, parseJson, parseProductId}
-import io.flashbook.flashbot.data.OrderBookProvider.Subscribe
-import io.flashbook.flashbot.data.TimeLog.TimeLog
-import io.flashbook.flashbot.data.{OrderBookProvider, TimeLog}
+import io.flashbook.flashbot.util
+import io.flashbook.flashbot.engine.OrderBookProvider.Subscribe
+import io.flashbook.flashbot.engine.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.engine.{OrderBookProvider, TimeLog}
 import net.openhft.chronicle.queue.TailerDirection
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
@@ -90,7 +90,7 @@ class CoinbaseMarketDataSource extends DataSource {
       })
       .run
     system.actorOf(Props(new LiveGDAXMarketData(fullStream ! _))) !
-      Subscribe(topics.keySet.map(parseProductId))
+      Subscribe(topics.keySet.map(util.parseProductId))
   }
 
   override def stream(dataDir: String, topic: String,
@@ -101,7 +101,7 @@ class CoinbaseMarketDataSource extends DataSource {
         case (FullBook, TimeRange(from, to)) =>
 
           val snapshotQueue =
-            timeLog[SnapshotItem](dataDir, parseProductId(topic), "book/snapshots")
+            timeLog[SnapshotItem](dataDir, util.parseProductId(topic), "book/snapshots")
 
           // Read the snapshots queue backwards until we can build up the latest snapshot.
           var snapOrders: Option[Queue[SnapshotOrder]] = None
@@ -121,7 +121,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
           if (snapOrders.isDefined) {
             val eventsQueue =
-              timeLog[APIOrderEvent](dataDir, parseProductId(topic), "book/events")
+              timeLog[APIOrderEvent](dataDir, util.parseProductId(topic), "book/events")
             val seq = snapOrders.get.head.seq
             var state = OrderBookMD[APIOrderEvent](NAME, topic).addSnapshot(seq, snapOrders.get)
 
@@ -141,7 +141,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue =
-            timeLog[TradeMD](dataDir, parseProductId(topic), "trades")
+            timeLog[TradeMD](dataDir, util.parseProductId(topic), "trades")
           tradesQueue.scan(from, _.micros, md => md.micros < to)(tradesQueue.close)
 
         case (DepthBook(_), _) =>
@@ -201,7 +201,7 @@ class CoinbaseMarketDataSource extends DataSource {
       // This is where we process every event coming in from the wire that occurs after we get
       // the initial "subscriptions" event. They are not guaranteed to be ordered correctly.
       def ingestEvent(ev: UnparsedAPIOrderEvent): Unit = {
-        val p: Pair = parseProductId(ev.product_id)
+        val p: Pair = util.parseProductId(ev.product_id)
 
         // If this is the first event for this product, then initialize the buffer.
         if (!buffers.isDefinedAt(p)) {
@@ -225,7 +225,7 @@ class CoinbaseMarketDataSource extends DataSource {
         override def onOpen(handshakedata: ServerHandshake): Unit = {}
 
         override def onMessage(message: String): Unit = {
-          parseJson[UnparsedAPIOrderEvent](message) match {
+          util.json.parseJson[UnparsedAPIOrderEvent](message) match {
             case Right(ev) =>
               if (subscribed)
                 ingestEvent(ev)
@@ -302,18 +302,18 @@ class CoinbaseMarketDataSource extends DataSource {
     def toOrderEvent: OrderEvent = {
       `type` match {
         case "open" =>
-          OrderOpen(order_id.get, parseProductId(product_id), price.get, remaining_size.get,
+          OrderOpen(order_id.get, util.parseProductId(product_id), price.get, remaining_size.get,
             Side.parseSide(side.get))
         case "done" =>
-          OrderDone(order_id.get, parseProductId(product_id), Side.parseSide(side.get),
+          OrderDone(order_id.get, util.parseProductId(product_id), Side.parseSide(side.get),
             DoneReason.parse(reason.get), price, remaining_size)
         case "change" =>
-          OrderChange(order_id.get, parseProductId(product_id), price, new_size.get)
+          OrderChange(order_id.get, util.parseProductId(product_id), price, new_size.get)
         case "match" =>
-          OrderMatch(trade_id.get, parseProductId(product_id), micros, size.get, price.get,
+          OrderMatch(trade_id.get, util.parseProductId(product_id), micros, size.get, price.get,
             Side.parseSide(side.get), maker_order_id.get, taker_order_id.get)
         case "received" =>
-          OrderReceived(order_id.get, parseProductId(product_id), client_oid,
+          OrderReceived(order_id.get, util.parseProductId(product_id), client_oid,
             OrderType.parseOrderType(order_type.get))
       }
     }
@@ -349,7 +349,7 @@ class CoinbaseMarketDataSource extends DataSource {
                                    client_oid: Option[String]) {
 
     def parse: APIOrderEvent = APIOrderEvent(`type`, product_id, sequence.get,
-      time.map(ISO8601ToMicros).get, size.map(_.toDouble), price.map(_.toDouble), order_id,
+      time.map(util.time.ISO8601ToMicros).get, size.map(_.toDouble), price.map(_.toDouble), order_id,
       side, reason, order_type, remaining_size.map(_.toDouble), funds.map(_.toDouble), trade_id,
       maker_order_id, taker_order_id, taker_user_id, user_id, taker_profile_id, profile_id,
       new_size.map(_.toDouble), old_size.map(_.toDouble), new_funds.map(_.toDouble),

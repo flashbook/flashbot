@@ -1,14 +1,10 @@
 package io.flashbook.flashbot.core
 
-import com.sun.xml.internal.bind.v2.runtime.output.DOMOutput
 import io.flashbook.flashbot.core.Action.{ActionQueue, CancelLimitOrder, PostLimitOrder, PostMarketOrder}
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD}
 import io.flashbook.flashbot.core.TradingSession._
+import io.flashbook.flashbot.engine.TradingSession.OrderTarget
 
 import scala.collection.immutable.Queue
-import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-
-import scala.math.BigDecimal.RoundingMode
 import scala.math.BigDecimal.RoundingMode.HALF_DOWN
 
 /**

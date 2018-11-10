@@ -5,6 +5,7 @@ import io.flashbook.flashbot.core.Order
 import io.flashbook.flashbot.core.Order._
 import io.flashbook.flashbot.core.OrderBook.OrderBookMD
 import io.flashbook.flashbot.core._
+import io.flashbook.flashbot.engine.TradingSession
 
 import scala.collection.immutable.Queue
 

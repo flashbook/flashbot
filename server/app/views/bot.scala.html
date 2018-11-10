@@ -1,0 +1,20 @@
+@import io.flashbook.flashbot.core.TradingSession.TradingSessionState
+@import java.time.Instant
+
+@(botId: String, session: Option[TradingSessionState])
+
+@main(botId) {
+	<h2>@botId</h2>
+	@if(session.isEmpty) {
+		<h3>Bot not started</h3>
+	} else {
+		<h3>Bot started at @{Instant.ofEpochMilli(session.get.startedAt / 1000)}</h3>
+	}
+
+	<div id="report"></div>
+
+	@*<ul>*@
+		@*<li>Play shouts out: <em>@session</em></li>*@
+		@*<li>Scala.js shouts out: <em id="scalajsShoutOut"></em></li>*@
+	@*</ul>*@
+}

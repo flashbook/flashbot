@@ -9,7 +9,8 @@ import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest, StatusCodes, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
-import io.flashbook.flashbot.core.{Exchange, Filled, LimitOrderRequest, MarketOrderRequest, OrderDone, OrderOpen, OrderReceived, OrderRequest, Pair, Utils}
+import io.flashbook.flashbot.util.stripTrailingZeroes
+import io.flashbook.flashbot.core.{Exchange, Filled, LimitOrderRequest, MarketOrderRequest, OrderDone, OrderOpen, OrderReceived, OrderRequest, Pair}
 import io.flashbook.flashbot.core.Order.{Fill, Market, Taker}
 import io.flashbook.flashbot.core.Order.Side.parseSide
 import io.circe.Json
@@ -73,7 +74,7 @@ class Binance(params: Json)(implicit val system: ActorSystem,
         ("symbol", formatPair(product)),
         ("side", side.toString.toUpperCase),
         ("type", "MARKET"),
-        ("quantity", Utils.stripTrailingZeroes(size.get.toString)),
+        ("quantity", stripTrailingZeroes(size.get.toString)),
         ("recvWindow", "5000"),
         ("timestamp", System.currentTimeMillis.toString),
         ("newClientOrderId", clientOid),

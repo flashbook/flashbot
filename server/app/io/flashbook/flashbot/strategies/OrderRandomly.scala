@@ -4,6 +4,7 @@ import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core._
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TradingSession
 
 import scala.util.Random
 

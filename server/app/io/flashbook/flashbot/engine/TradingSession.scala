@@ -1,27 +1,28 @@
-package io.flashbook.flashbot.core
+package io.flashbook.flashbot.engine
 
-import java.util.{Date, UUID}
 import java.util.concurrent.Executors
+import java.util.{Date, UUID}
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill}
-import akka.stream.{ActorAttributes, ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import io.circe.Json
 import io.flashbook.flashbot.core.Action.{ActionQueue, CancelLimitOrder, PostLimitOrder, PostMarketOrder}
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD}
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.core.Exchange.ExchangeConfig
 import io.flashbook.flashbot.core.Order.{Buy, Fill, Sell}
-import io.flashbook.flashbot.core.Report._
-import io.flashbook.flashbot.core.TradingEngine._
-import io.flashbook.flashbot.core.Utils.parseProductId
+import io.flashbook.flashbot.util.stream._
+import io.flashbook.flashbot.util.time.{currentTimeMicros, formatDate}
+import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core._
+import io.flashbook.flashbot.engine.TradingEngine.EngineError
 import io.flashbook.flashbot.exchanges.Simulator
-import io.circe.Json
+import io.flashbook.flashbot.report._
 
 import scala.collection.immutable.Queue
 import scala.collection.mutable
-import scala.concurrent.forkjoin.ForkJoinPool
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object TradingSession {
@@ -83,7 +84,7 @@ object TradingSession {
 //      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
     implicit val ec: ExecutionContext = ExecutionContext.global
     implicit val system: ActorSystem = context.system
-    implicit val mat: ActorMaterializer = Utils.buildMaterializer
+    implicit val mat: ActorMaterializer = buildMaterializer
 
     val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
     var tickRefOpt: Option[ActorRef] = None
@@ -105,11 +106,11 @@ object TradingSession {
       } catch {
         case err: ClassNotFoundException =>
           return Left(
-            EngineError(s"Strategy class not found: ${strategyClassNames(strategyKey)}", err))
+            EngineError(s"Strategy class not found: ${strategyClassNames(strategyKey)}", Some(err)))
 
         case err: ClassCastException =>
           return Left(EngineError(s"Class ${strategyClassNames(strategyKey)} must be a " +
-            s"subclass of io.flashbook.core.Strategy", err))
+            s"subclass of io.flashbook.core.Strategy", Some(err)))
       }
 
       // Instantiate the strategy
@@ -117,7 +118,7 @@ object TradingSession {
         strategyOpt = Some(strategyClassOpt.get.newInstance)
       } catch {
         case err: Throwable =>
-          return Left(EngineError(s"Strategy instantiation error: $strategyKey", err))
+          return Left(EngineError(s"Strategy instantiation error: $strategyKey", Some(err)))
       }
 
       var dataSources = Map.empty[String, DataSource]
@@ -141,10 +142,10 @@ object TradingSession {
         } catch {
           case err: ClassNotFoundException =>
             throw EngineError(s"Data source class not found: " +
-              s"${dataSourceClassNames(srcKey)}", err)
+              s"${dataSourceClassNames(srcKey)}", Some(err))
           case err: ClassCastException =>
             throw EngineError(s"Class ${dataSourceClassNames(srcKey)} must be a " +
-              s"subclass of io.flashbook.core.DataSource", err)
+              s"subclass of io.flashbook.core.DataSource", Some(err))
         }
 
         try {
@@ -153,7 +154,7 @@ object TradingSession {
           dataSource
         } catch {
           case err: Throwable =>
-            throw EngineError(s"Data source instantiation error: $srcKey", err)
+            throw EngineError(s"Data source instantiation error: $srcKey", Some(err))
         }
       }
 
@@ -187,7 +188,7 @@ object TradingSession {
         case err: Throwable =>
           println("CAUSE", err.getMessage)
 //          err.getCause.printStackTrace()
-          return Left(EngineError(s"Strategy initialization error: $strategyKey", err))
+          return Left(EngineError(s"Strategy initialization error: $strategyKey", Some(err)))
       }
 
       // Initialization validation
@@ -216,10 +217,10 @@ object TradingSession {
               .asSubclass(classOf[Exchange]))
           } catch {
             case err: ClassNotFoundException =>
-              return Left(EngineError("Exchange class not found: " + exClass, err))
+              return Left(EngineError("Exchange class not found: " + exClass, Some(err)))
             case err: ClassCastException =>
               return Left(EngineError(s"Class $exClass must be a " +
-                s"subclass of io.flashbook.core.Exchange", err))
+                s"subclass of io.flashbook.core.Exchange", Some(err)))
           }
 
           try {
@@ -237,7 +238,7 @@ object TradingSession {
             exchanges = exchanges + (srcKey -> finalTickInstance)
           } catch {
             case err: Throwable =>
-              return Left(EngineError(s"Exchange instantiation error: $srcKey", err))
+              return Left(EngineError(s"Exchange instantiation error: $srcKey", Some(err)))
           }
         }
       }
@@ -259,7 +260,7 @@ object TradingSession {
         .mapValues(_.map(_.topic).map(parseProductId).toSet)
 
       Right(SessionSetup(markets, dataSourceAddresses, dataSources,
-        exchanges, strategyOpt.get, UUID.randomUUID.toString, Utils.currentTimeMicros))
+        exchanges, strategyOpt.get, UUID.randomUUID.toString, currentTimeMicros))
     }
 
     def runSession(sessionSetup: SessionSetup): String = sessionSetup match {
@@ -502,7 +503,7 @@ object TradingSession {
                 // Also balance info
                 val rb = ret(acc(base))
                 val rq = ret(acc(quote))
-                val t = Utils.formatDate(new Date(micros / 1000))
+                val t = formatDate(new Date(micros / 1000))
 
                 emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), micros))
                 emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), micros))

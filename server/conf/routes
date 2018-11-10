@@ -4,6 +4,7 @@
 
 # Home page
 GET        /                             io.flashbook.flashbot.controllers.Application.index
+GET        /bots/:bot                    io.flashbook.flashbot.controllers.Application.bot(bot)
 
 # Prefix must match `play.assets.urlPrefix`
 GET        /assets/*file                 controllers.Assets.at(file)

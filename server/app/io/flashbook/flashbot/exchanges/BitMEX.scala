@@ -1,6 +1,6 @@
 package io.flashbook.flashbot.exchanges
 
-import io.flashbook.flashbot.core.{Exchange, MarketData, Order, OrderEvent, OrderRequest, Pair, TradingSession}
+import io.flashbook.flashbot.core.{Exchange, MarketData, Order, OrderEvent, OrderRequest, Pair}
 
 class BitMEX extends Exchange {
   override def makerFee: Double = ???

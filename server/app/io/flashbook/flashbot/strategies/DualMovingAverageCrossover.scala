@@ -2,9 +2,10 @@ package io.flashbook.flashbot.strategies
 
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.Utils.parseProductId
+import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.EMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 

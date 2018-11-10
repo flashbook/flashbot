@@ -14,12 +14,14 @@ import akka.stream.scaladsl.{Flow, Sink, Source}
 import org.java_websocket.client.WebSocketClient
 import io.flashbook.flashbot.core.AggBook._
 import io.flashbook.flashbot.core.DataSource._
-import io.flashbook.flashbot.core.Utils._
-import io.flashbook.flashbot.core.{AggBook => _, _}
-import io.flashbook.flashbot.data.TimeLog
-import io.flashbook.flashbot.data.TimeLog.{ScanDuration, TimeLog}
+import io.flashbook.flashbot.util
+import io.flashbook.flashbot.util.stream._
+import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core.{DataSource, AggBook => _, _}
+import io.flashbook.flashbot.engine.TimeLog.{ScanDuration, TimeLog}
 import io.circe.{Decoder, Json}
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TimeLog
 import org.java_websocket.WebSocket
 import org.java_websocket.framing.Framedata
 import org.java_websocket.handshake.ServerHandshake
@@ -228,8 +230,7 @@ class BinanceMarketDataSource extends DataSource {
         var state: Option[AggSnapshot] = None
         for (book <- snapshotsLog.scan[Long](0, _.micros, _ => state.isEmpty)(snapshotsLog.close)) {
           if (book.micros >= timeRange.from && book.micros < timeRange.to) {
-            // Turn book sides into TreeMaps
-            state = Some(book.copy(book = book.book.copy(data = book.book.data.convertToTreeMaps)))
+            state = Some(book)
           }
         }
 
@@ -465,12 +466,12 @@ class BinanceMarketDataSource extends DataSource {
 
         override def onMessage(message: String): Unit = {
           // First try to parse as a Seq of T
-          parseJson[Seq[T]](message) match {
+          util.json.parseJson[Seq[T]](message) match {
             case Right(data: Seq[T]) =>
               data.foreach(self ! _)
             case Left(_) =>
               // Next try a wrapped T
-              parseJson[StreamWrap[T]](message) match {
+              util.json.parseJson[StreamWrap[T]](message) match {
                 case Right(StreamWrap(_, data)) =>
                   self ! data
                 case Left(a) =>
@@ -505,7 +506,7 @@ class BinanceMarketDataSource extends DataSource {
     import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
     implicit val ec: ExecutionContext = context.dispatcher
     implicit val system: ActorSystem = context.system
-    implicit val mat: ActorMaterializer = Utils.buildMaterializer
+    implicit val mat: ActorMaterializer = buildMaterializer
 
     private var buffer = Queue.empty[DepthUpdateEvent]
     private var hasRequestedSnapshot = false

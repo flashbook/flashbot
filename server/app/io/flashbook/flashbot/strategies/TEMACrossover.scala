@@ -3,6 +3,7 @@ package io.flashbook.flashbot.strategies
 import io.flashbook.flashbot.core._
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.TripleEMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 

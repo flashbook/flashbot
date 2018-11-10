@@ -5,7 +5,7 @@ import akka.pattern.ask
 import akka.util.Timeout
 
 import scala.concurrent.duration._
-import io.flashbook.flashbot.core.TradingEngine.{Command, Ping, Pong, Query, Response}
+import io.flashbook.flashbot.engine.TradingEngine._
 
 import scala.concurrent.Await
 

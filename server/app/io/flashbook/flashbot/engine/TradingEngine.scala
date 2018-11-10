@@ -1,19 +1,22 @@
-package io.flashbook.flashbot.core
+package io.flashbook.flashbot.engine
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill, Props, Status}
-import akka.persistence._
-import akka.pattern.pipe
-import akka.pattern.ask
-import io.circe.{Encoder, Json}
-import io.circe.parser.parse
-import TradingSession._
 import akka.Done
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
+import akka.pattern.{ask, pipe}
+import akka.persistence._
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
-import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import akka.util.Timeout
+import io.circe.Json
+import io.circe.parser.parse
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core.Exchange.ExchangeConfig
-import io.flashbook.flashbot.core.Report._
+import io.flashbook.flashbot.report.Report
+import io.flashbook.flashbot.core._
+import io.flashbook.flashbot.util.time.currentTimeMicros
+import io.flashbook.flashbot.util.stream.buildMaterializer
+import io.flashbook.flashbot.engine.TradingSession._
+import io.flashbook.flashbot.report.{BalanceEvent, Report, ReportDelta, ReportEvent}
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
@@ -31,13 +34,14 @@ class TradingEngine(dataDir: String,
   extends PersistentActor with ActorLogging {
 
   implicit val system: ActorSystem = context.system
-  implicit val mat: ActorMaterializer = Utils.buildMaterializer
+  implicit val mat: ActorMaterializer = buildMaterializer
   implicit val ec: ExecutionContext = system.dispatcher
 
   import TradingEngine._
+
   import scala.collection.immutable.Seq
 
-  val snapshotInterval = 1000
+  val snapshotInterval = 100000
   var state = EngineState(Map.empty)
 
   override def persistenceId: String = "trading-engine"
@@ -93,7 +97,7 @@ class TradingEngine(dataDir: String,
             Report.empty(strategy, params)
           )
       }
-      Right(EngineStarted(Utils.currentTimeMicros) :: Nil)
+      Right(EngineStarted(currentTimeMicros, defaultBots.keySet) :: Nil)
 
     /**
       * A wrapper around a new SessionActor, which runs the actual strategy. This may be initiated
@@ -140,7 +144,7 @@ class TradingEngine(dataDir: String,
         }
       } catch {
         case err: TimeoutException =>
-          Left(EngineError("Trading session initialization timeout", err))
+          Left(EngineError("Trading session initialization timeout", Some(err)))
       }
 
     /**
@@ -201,10 +205,17 @@ class TradingEngine(dataDir: String,
       case Ping =>
         sender ! Pong
 
-      case BotQuery(id) =>
-        sender ! BotResponse(id, state.bots(id).map(_.report))
+      case BotSessionsQuery(id) =>
+        sender ! state.bots.get(id)
+          .map(sessions => BotSessionsResponse(id, sessions))
+          .getOrElse(EngineError("Bot not found"))
 
-      case BotsQuery() =>
+      case BotReportQuery(id) =>
+        sender ! state.bots.get(id)
+          .map(sessions => BotResponse(id, sessions.map(_.report)))
+          .getOrElse(EngineError("Bot not found"))
+
+      case BotReportsQuery() =>
         sender ! BotsResponse(bots = state.bots.map { case (id, bot) =>
           BotResponse(id, bot.map(_.report))
         }.toSeq)
@@ -294,8 +305,11 @@ object TradingEngine {
       * engine. No side effects or outside state please!
       */
     def update(event: Event): EngineState = event match {
-      case EngineStarted(micros) =>
-        copy(startedAtMicros = micros)
+      case EngineStarted(micros, withBots) =>
+        copy(
+          startedAtMicros = micros,
+          bots = withBots.map(botId => botId -> Seq.empty[TradingSessionState]).toMap ++ bots
+        )
 
       case SessionStarted(id, Some(botId), strategyKey, strategyParams, mode,
           micros, balances, report) =>
@@ -338,7 +352,7 @@ object TradingEngine {
                             micros: Long,
                             balances: Map[Account, Double],
                             report: Report) extends Event
-  case class EngineStarted(micros: Long) extends Event
+  case class EngineStarted(micros: Long, withBots: Set[String]) extends Event
 
   sealed trait SessionUpdated extends Event {
     def botId: String
@@ -359,8 +373,9 @@ object TradingEngine {
                            balances: String,
                            barSize: Option[Duration]) extends Query
 
-  case class BotQuery(botId: String) extends Query
-  case class BotsQuery() extends Query
+  case class BotReportQuery(botId: String) extends Query
+  case class BotReportsQuery() extends Query
+  case class BotSessionsQuery(botId: String) extends Query
   case class StrategiesQuery() extends Query
 
   sealed trait Response
@@ -370,10 +385,11 @@ object TradingEngine {
   case class ReportResponse(report: Report) extends Response
   case class BotResponse(id: String, reports: Seq[Report]) extends Response
   case class BotsResponse(bots: Seq[BotResponse]) extends Response
+  case class BotSessionsResponse(id: String, sessions: Seq[TradingSessionState]) extends Response
   case class StrategyResponse(name: String) extends Response
   case class StrategiesResponse(strats: Seq[StrategyResponse]) extends Response
 
-  final case class EngineError(message: String, cause: Throwable = None.orNull)
-    extends Exception(message, cause) with Response
+  final case class EngineError(message: String, cause: Option[Throwable] = None)
+    extends Exception(message, cause.orNull) with Response
 
 }

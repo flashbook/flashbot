@@ -1,12 +1,15 @@
 package io.flashbook.flashbot.api
 
-import io.flashbook.flashbot.core.Report.TradeEvent
+import io.flashbook.flashbot.report.TradeEvent
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.TradingEngine._
-import io.flashbook.flashbot.core.Utils.printJson
+import io.flashbook.flashbot.engine.TradingEngine._
+import io.flashbook.flashbot.util.json._
+import io.flashbook.flashbot.util.time.parseDuration
 import io.circe.{Json, JsonNumber}
 import io.circe.parser._
 import io.circe.syntax._
+import io.flashbook.flashbot.engine.TradingEngine.StrategyResponse
+import io.flashbook.flashbot.report.{Report, TradeEvent}
 import sangria.schema._
 import sangria.macros.derive._
 import sangria.marshalling.FromInput
@@ -110,7 +113,7 @@ object GraphQLSchema {
           c.arg(StrategyParamsArg),
           TimeRange(c.arg(FromArg), c.arg(ToArg)),
           c.arg(BalancesArg),
-          c.arg(BarSizeArg).map(Utils.parseDuration)
+          c.arg(BarSizeArg).map(parseDuration)
         )).report),
 
       /**
@@ -118,13 +121,13 @@ object GraphQLSchema {
         */
       Field("bot", BotType,
         arguments = BotIdArg :: Nil,
-        resolve = c => c.ctx.request[BotResponse](BotQuery(c.arg(BotIdArg)))),
+        resolve = c => c.ctx.request[BotResponse](BotReportQuery(c.arg(BotIdArg)))),
 
       /**
         * Query for all bots, without their reports.
         */
       Field("bots", ListType(BotType),
-        resolve = c => c.ctx.request[BotsResponse](BotsQuery()).bots),
+        resolve = c => c.ctx.request[BotsResponse](BotReportsQuery()).bots),
 
       /**
         * Query for all loaded strategies.

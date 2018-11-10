@@ -2,9 +2,9 @@ package io.flashbook.flashbot
 
 import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-import io.flashbook.flashbot.core.Utils.parseProductId
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.util.parseProductId
 
 package object core {
 
@@ -20,7 +20,7 @@ package object core {
   }
 
   object Pair {
-    def apply(str: String): Pair = Utils.parseProductId(str)
+    def apply(str: String): Pair = parseProductId(str)
   }
 
   case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped
@@ -128,6 +128,8 @@ package object core {
 
   sealed trait StrategyEvent
   case class StrategyOrderEvent(targetId: TargetId, event: OrderEvent) extends StrategyEvent
+
+  sealed trait StrategyCommand
 
   sealed trait Size
   sealed trait FixedSize extends Size {

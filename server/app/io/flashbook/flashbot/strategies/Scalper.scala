@@ -2,9 +2,10 @@ package io.flashbook.flashbot.strategies
 
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.Utils.{parseProductId, parseDuration}
+import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.EMAIndicator
 import org.ta4j.core.indicators.helpers.{ClosePriceIndicator, GainIndicator}
 
@@ -24,7 +25,7 @@ class Scalper extends Strategy {
   var ts: Option[TimeSeriesGroup] = None
   var params: Option[Params] = None
 
-  def product: Pair = parseProductId(params.get.market)
+  def product: Pair = util.parseProductId(params.get.market)
   lazy val closePrice = new ClosePriceIndicator(ts.get.get(params.get.exchange, product).get)
   lazy val shortEMA = new EMAIndicator(closePrice, params.get.short)
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
@@ -56,7 +57,7 @@ class Scalper extends Strategy {
         val returns = 1 - price / entry.get._2
         val shouldTake = returns > 0 && returns > params.get.take
         val shouldStop = returns < 0 && -returns > params.get.stop
-        val timeLimitReached = (md.micros - entry.get._1) > parseDuration(params.get.limit).toMicros
+        val timeLimitReached = (md.micros - entry.get._1) > util.parseDuration(params.get.limit).toMicros
 
         if (shouldTake || shouldStop || timeLimitReached) {
           orderTargetRatio(params.get.exchange, product.toString, -1)

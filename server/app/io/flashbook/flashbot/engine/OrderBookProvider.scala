@@ -1,9 +1,9 @@
-package io.flashbook.flashbot.data
+package io.flashbook.flashbot.engine
 
 import akka.actor.Actor
 import akka.event.Logging
 import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
-import io.flashbook.flashbot.core.{OrderEvent, Pair, RawOrderEvent}
+import io.flashbook.flashbot.core.{Pair, RawOrderEvent}
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}

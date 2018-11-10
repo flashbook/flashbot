@@ -1,0 +1,14 @@
+@(message: String, stackTrace: Option[Seq[StackTraceElement]])
+
+@main(message) {
+	<h2>@message</h2>
+	@if(stackTrace.isDefined) {
+		<h3>Stack trace</h3>
+		<p>
+			@for(line<-stackTrace.get) {
+				@line
+				<br />
+			}
+		</p>
+	}
+}

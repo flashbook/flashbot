@@ -1,11 +1,10 @@
-package io.flashbook.flashbot.data
+package io.flashbook.flashbot.engine
 
 import java.io.File
 import java.util
-import java.util.Comparator
 
-import io.flashbook.flashbot.core.Timestamped
 import io.circe.{Decoder, Encoder, Printer}
+import io.flashbook.flashbot.core.Timestamped
 import net.openhft.chronicle.bytes.Bytes
 import net.openhft.chronicle.core.time.TimeProvider
 import net.openhft.chronicle.queue._
@@ -58,8 +57,8 @@ object TimeLog {
 
   class TimeLog[T <: Timestamped](path: File) {
 
-    import io.circe.syntax._
     import io.circe.parser._
+    import io.circe.syntax._
 
     private val RetentionPeriod = 1000 * 60 * 60 * 24 * 30
 

@@ -1,8 +1,9 @@
 package io.flashbook.flashbot.strategies
 
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
-import io.flashbook.flashbot.core.{Account, MarketData, Strategy, TradingSession}
+import io.flashbook.flashbot.core.{Account, MarketData, Strategy}
 import io.circe.Json
+import io.flashbook.flashbot.engine.TradingSession
 
 /**
   * Do you have a magical feed of buy/sell signals? This strategy simply turns those signals into

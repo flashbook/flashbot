@@ -1,11 +1,11 @@
 package io.flashbook.flashbot.core
 
+import io.circe.generic.auto._
+import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.{Decoder, Encoder, KeyDecoder, KeyEncoder}
 import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-import io.flashbook.flashbot.core.Utils.parseProductId
-import io.circe._
-import io.circe.{KeyDecoder, KeyEncoder}
-import io.circe.generic.semiauto._
+import io.flashbook.flashbot.util.parseProductId
 
 import scala.collection.immutable.{SortedMap, TreeMap}
 
@@ -20,8 +20,22 @@ object AggBook {
   }
 
   case class AggBook(depth: Int,
-                     asks: Map[Double, Double] = TreeMap.empty,
-                     bids: Map[Double, Double] = TreeMap.empty(Ordering.by(-_))) {
+                     asks: SortedMap[Double, Double] = TreeMap.empty,
+                     bids: SortedMap[Double, Double] = TreeMap.empty(Ordering.by(-_)))
+    extends CanDeltaUpdate {
+
+    case class Delta(side: QuoteSide, priceLevel: Double, quantity: Double)
+
+    override def deltaEncoder = implicitly[Encoder[Delta]]
+    override def deltaDecoder = implicitly[Decoder[Delta]]
+
+    assert(asks.isEmpty || asks.firstKey > asks.lastKey, "Asks out of order")
+    assert(bids.isEmpty || bids.firstKey > bids.lastKey, "Bids out of order")
+
+    override def update(delta: Delta) = delta match {
+      case Delta(side, priceLevel, quantity) =>
+        updateLevel(side, priceLevel, quantity)
+    }
 
     def updateLevel(side: QuoteSide, priceLevel: Double, quantity: Double): AggBook =
       side match {
@@ -31,30 +45,19 @@ object AggBook {
           copy(asks = updateMap(asks, priceLevel, quantity))
       }
 
-    def convertToTreeMaps: AggBook = copy(
-      asks = toTreeMap(asks, reverse = false),
-      bids = toTreeMap(bids, reverse = true)
-    )
+//    def convertToTreeMaps: AggBook = copy(
+//      asks = toTreeMap(asks, reverse = false),
+//      bids = toTreeMap(bids, reverse = true)
+//    )
 
     def spread: Option[Double] = {
-      if (asks.asInstanceOf[SortedMap[Double, Double]].firstKey >
-          asks.asInstanceOf[SortedMap[Double, Double]].lastKey) {
-        throw new RuntimeException("Asks out of order")
-      }
-      if (bids.asInstanceOf[SortedMap[Double, Double]].firstKey <
-          bids.asInstanceOf[SortedMap[Double, Double]].lastKey) {
-        throw new RuntimeException("Bids out of order")
-      }
-
       if (asks.isEmpty || bids.isEmpty) None
-      else Some(asks.asInstanceOf[SortedMap[Double, Double]].firstKey -
-        bids.asInstanceOf[SortedMap[Double, Double]].firstKey)
+      else Some(asks.firstKey - bids.firstKey)
     }
 
     def midMarketPrice: Option[Double] = {
       if (asks.isEmpty || bids.isEmpty) None
-      else Some((asks.asInstanceOf[SortedMap[Double, Double]].firstKey +
-        bids.asInstanceOf[SortedMap[Double, Double]].firstKey) / 2)
+      else Some((asks.firstKey + bids.firstKey) / 2)
     }
 
     def quantityAtPrice(price: Double): Option[Double] =
@@ -64,10 +67,10 @@ object AggBook {
   implicit val aggBookDecoder: Decoder[AggBook] = deriveDecoder[AggBook]
   implicit val aggBookEncoder: Encoder[AggBook] = deriveEncoder[AggBook]
 
-  def toTreeMap(map: Map[Double, Double], reverse: Boolean): TreeMap[Double, Double] =
-    map.foldLeft(TreeMap.empty[Double, Double](Ordering.by(price =>
-      if (reverse) -price else price
-    )))(_ + _)
+//  def toTreeMap(map: Map[Double, Double], reverse: Boolean): TreeMap[Double, Double] =
+//    map.foldLeft(TreeMap.empty[Double, Double](Ordering.by(price =>
+//      if (reverse) -price else price
+//    )))(_ + _)
 
   /**
     * Match an incoming order against an aggregated order book. Emit fills.
@@ -91,7 +94,7 @@ object AggBook {
           throw new RuntimeException("A limit order cannot be placed in terms of notional funds.")
         }
 
-        val ladder = book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+        val ladder = book.asks.toSeq.iterator
         var remainingFunds = funds
         while (remainingFunds > 0) {
           if (!ladder.hasNext) {
@@ -110,9 +113,9 @@ object AggBook {
       case (_, Some(size), None) =>
         val ladder = side match {
           case Buy =>
-            book.asks.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+            book.asks.toSeq.iterator
           case Sell =>
-            book.bids.asInstanceOf[TreeMap[Double, Double]].toSeq.iterator
+            book.bids.toSeq.iterator
         }
         var remainingSize = size
         var limitExceeded = false
@@ -149,9 +152,9 @@ object AggBook {
   implicit val aggBookMDDecoder: Decoder[AggBookMD] = deriveDecoder[AggBookMD]
   implicit val aggBookMDEncoder: Encoder[AggBookMD] = deriveEncoder[AggBookMD]
 
-  private def updateMap(map: Map[Double, Double],
+  private def updateMap(map: SortedMap[Double, Double],
                         priceLevel: Double,
-                        quantity: Double): Map[Double, Double] =
+                        quantity: Double): SortedMap[Double, Double] =
     quantity match {
       case 0 => map - priceLevel
       case _ => map + (priceLevel -> quantity)

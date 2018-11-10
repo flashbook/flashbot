@@ -1,12 +1,13 @@
-package io.flashbook.flashbot.data
+package io.flashbook.flashbot.engine
 
 import akka.actor.{Actor, ActorLogging, ActorSystem}
-import akka.stream.{ActorMaterializer, Materializer}
-import io.flashbook.flashbot.core.{DataSource, Utils}
+import akka.stream.ActorMaterializer
+import io.flashbook.flashbot.core.DataSource
+import io.flashbook.flashbot.util.stream.buildMaterializer
 
 class IngestService extends Actor with ActorLogging {
   implicit val system: ActorSystem = context.system
-  implicit val mat: ActorMaterializer = Utils.buildMaterializer
+  implicit val mat: ActorMaterializer = buildMaterializer
 
   override def receive: Receive = {
     case (name: String, dataDir: String, config: DataSource.DataSourceConfig,
