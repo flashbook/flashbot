@@ -4,7 +4,7 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Sink, Source}
-import io.flashbook.flashbot.core.{DataSource, MarketData, TimeRange}
+import io.flashbook.flashbot.core.{DataSource, DataSource, MarketData, TimeRange}
 import io.circe.Json
 
 object TwitterSearchDataSource {

@@ -1,6 +1,5 @@
 package io.flashbook.flashbot.api
 
-import io.flashbook.flashbot.report.TradeEvent
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.TradingEngine._
 import io.flashbook.flashbot.util.json._
@@ -9,7 +8,8 @@ import io.circe.{Json, JsonNumber}
 import io.circe.parser._
 import io.circe.syntax._
 import io.flashbook.flashbot.engine.TradingEngine.StrategyResponse
-import io.flashbook.flashbot.report.{Report, TradeEvent}
+import io.flashbook.flashbot.report.Report
+import io.flashbook.flashbot.report.ReportEvent.TradeEvent
 import sangria.schema._
 import sangria.macros.derive._
 

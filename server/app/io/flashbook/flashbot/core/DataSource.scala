@@ -1,15 +1,13 @@
 package io.flashbook.flashbot.core
 
-import io.flashbook.flashbot.util.time.parseDuration
-
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import io.circe.Json
+import io.flashbook.flashbot.util.time.parseDuration
 
 import scala.concurrent.duration.FiniteDuration
 
-abstract class DataSource {
-
+trait DataSource {
   def index(implicit sys: ActorSystem,
             mat: ActorMaterializer): Set[String] = {
     throw new NotImplementedError
@@ -19,7 +17,7 @@ abstract class DataSource {
              topics: Map[String, Json],
              dataTypes: Map[String, DataSource.DataTypeConfig])
             (implicit sys: ActorSystem,
-             mat: ActorMaterializer)
+             mat: ActorMaterializer): Unit
 
   def stream(dataDir: String,
              topic: String,
@@ -59,3 +57,4 @@ object DataSource {
     case _ => None
   }
 }
+

@@ -1,11 +1,11 @@
 package io.flashbook.flashbot.core
 
-import io.circe.{Decoder, Encoder, Json}
-import io.flashbook.flashbot.util.parseProductId
+import io.circe._
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
-import io.flashbook.flashbot.engine.TradingSession._
 import io.flashbook.flashbot.engine.TradingSession
-import io.flashbook.flashbot.report._
+import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent, SetHedge}
+import io.flashbook.flashbot.report.ReportEvent._
+import io.flashbook.flashbot.util.parseProductId
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -125,5 +125,4 @@ abstract class Strategy {
 }
 
 object Strategy {
-  final case class StrategyConfig()
 }

@@ -8,6 +8,7 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.Candle.CandleMD
 import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.{RSIIndicator, SMAIndicator, StochasticOscillatorDIndicator, StochasticOscillatorKIndicator}
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator

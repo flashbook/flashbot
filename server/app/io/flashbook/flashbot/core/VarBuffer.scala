@@ -6,8 +6,9 @@ import scala.reflect.{ClassTag, classTag}
 import io.flashbook.flashbot.core.State.Var
 import io.flashbook.flashbot.engine.TradingEngine.EngineError
 import io.flashbook.flashbot.engine.TradingSession
-import io.flashbook.flashbot.engine.TradingSession.{LogMessage, SessionReportEvent}
-import io.flashbook.flashbot.report.{PutValueEvent, RemoveValueEvent, Report, UpdateValueEvent}
+import io.flashbook.flashbot.engine.TradingSession._
+import io.flashbook.flashbot.report.ReportDelta._
+import io.flashbook.flashbot.report.ReportEvent._
 
 import scala.collection.mutable
 
@@ -26,7 +27,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
     * Set and load a var. Update session. Handle errors.
     */
   def set[T : ClassTag](key: String, value: T)
-                                       (implicit ctx: TradingSession, fmt: VarFmt[T]): Var[T] = {
+                       (implicit ctx: TradingSession, fmt: VarFmt[T]): Var[T] = {
 
     vars.get(key) match {
       /**
@@ -166,8 +167,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
         SessionReportEvent(UpdateValueEvent(current.key, delta))):_*)
     } else {
       implicit val deltaDe: Decoder[T] = fmt.modelDe
-      ctx.handleEvents(SessionReportEvent(PutValueEvent(
-        current.key, fmt.fmtName, current.value)))
+      ctx.handleEvents(SessionReportEvent(PutValueEvent(current.key, fmt.fmtName, current.value)))
     }
   }
 

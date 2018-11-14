@@ -16,6 +16,7 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util.time.currentTimeMicros
 import io.flashbook.flashbot.util.stream.buildMaterializer
 import io.flashbook.flashbot.engine.TradingSession._
+import io.flashbook.flashbot.report.ReportEvent.BalanceEvent
 import io.flashbook.flashbot.report._
 
 import scala.concurrent.duration._
@@ -138,7 +139,6 @@ class TradingEngine(dataDir: String,
               Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
                 mode, micros, initialBalances, initialReport) :: Nil)
             case err: EngineError =>
-              println("error on left", err)
               Left(err)
           }
         } catch {
@@ -228,7 +228,7 @@ class TradingEngine(dataDir: String,
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
         * all session events into a stream that we fold over to create a report.
         */
-      case BacktestQuery(strategyName, params, timeRange, balancesStr, barSize, reportUpdates) =>
+      case BacktestQuery(strategyName, params, timeRange, balancesStr, barSize, eventsOut) =>
 
         try {
 
@@ -258,22 +258,20 @@ class TradingEngine(dataDir: String,
               })
               // Send the report deltas to the client if requested.
               .alsoTo(Sink.foreach(rd => {
-                if (reportUpdates) {
-                  rd._2.foreach(sender ! _)
-                }
+                eventsOut.foreach(ref => rd._2.foreach(ref ! _))
               }))
               .map(_._1)
               .toMat(Sink.last)(Keep.both)
               .run
 
           // Always send the initial report back to let the client know we started the backtest.
-          sender ! report
+          eventsOut.foreach(_ ! report)
 
           // Start the trading session
           processCommand(StartTradingSession(None, strategyName, paramsJson,
               Backtest(timeRange), ref, balances, report)) match {
             case Left(err: EngineError) =>
-              throw err
+              eventsOut.foreach(_ ! err)
             case Right(events: Seq[Event]) =>
               events.foreach(println)
           }
@@ -389,7 +387,7 @@ object TradingEngine {
                            timeRange: TimeRange,
                            balances: String,
                            barSize: Option[Duration],
-                           reportUpdates: Boolean = false) extends Query
+                           eventsOut: Option[ActorRef] = None) extends Query
 
   case class BotReportQuery(botId: String) extends Query
   case class BotReportsQuery() extends Query

@@ -15,7 +15,7 @@ import akka.util.Timeout
 import io.flashbook.flashbot.api.{BacktestSocket, BotSocket}
 import io.flashbook.flashbot.core.TimeRange
 import io.flashbook.flashbot.engine.TradingEngine._
-import io.flashbook.flashbot.engine.TradingEngine
+import io.flashbook.flashbot.engine.TradingSession
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}

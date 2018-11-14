@@ -36,7 +36,6 @@ lazy val client = (project in file("client")).settings(commonSettings).settings(
   ),
   scalaJSUseMainModuleInitializer := true,
   scalacOptions += "-P:scalajs:sjsDefinedByDefault",
-  addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full),
   webpackDevServerExtraArgs := Seq("--inline", "--hot"),
   npmDependencies in Compile ++= Seq(
     "react" -> "16.5.2",
@@ -133,6 +132,7 @@ lazy val statsDeps = List(
 lazy val commonSettings = Seq(
   scalaVersion := "2.12.5",
   organization := "io.flashbook",
+  addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
   libraryDependencies ++= Seq(
     "io.circe" %%% "circe-core" % circeVersion,
     "io.circe" %%% "circe-generic" % circeVersion,
