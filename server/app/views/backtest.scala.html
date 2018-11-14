@@ -1,0 +1,11 @@
+@(strategy: String)
+
+@main(strategy) {
+	<script>
+		window.BacktestConfig = {
+		    strategy: "@strategy"
+		};
+	</script>
+
+	<div id="report"></div>
+}

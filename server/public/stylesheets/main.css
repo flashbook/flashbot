@@ -1,0 +1,31 @@
+.Report {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    bottom: 0;
+}
+
+.pane-parent {
+}
+
+.pane {
+    background: #f7fbff;
+}
+
+.pane-parent.left .pane {
+    border-right: 1px solid #c9cad2;
+}
+
+.pane-parent.right .pane {
+    border-left: 1px solid #c9cad2;
+}
+
+.pane-parent.is-vertical .pane {
+    border-bottom: 1px solid #c9cad2;
+}
+
+.pane-parent.is-vertical .pane:last-of-type {
+    border-bottom: none;
+}
+

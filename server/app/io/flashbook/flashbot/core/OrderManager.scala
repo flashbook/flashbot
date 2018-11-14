@@ -1,7 +1,7 @@
 package io.flashbook.flashbot.core
 
 import io.flashbook.flashbot.core.Action.{ActionQueue, CancelLimitOrder, PostLimitOrder, PostMarketOrder}
-import io.flashbook.flashbot.core.TradingSession._
+import io.flashbook.flashbot.engine.TradingSession._
 import io.flashbook.flashbot.engine.TradingSession.OrderTarget
 
 import scala.collection.immutable.Queue

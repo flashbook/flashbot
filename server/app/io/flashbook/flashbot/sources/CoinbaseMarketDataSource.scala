@@ -20,6 +20,7 @@ import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
 import io.flashbook.flashbot.engine.{OrderBookProvider, TimeLog}
+import io.flashbook.flashbot.util.time.TimeFmt
 import net.openhft.chronicle.queue.TailerDirection
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
@@ -349,7 +350,7 @@ class CoinbaseMarketDataSource extends DataSource {
                                    client_oid: Option[String]) {
 
     def parse: APIOrderEvent = APIOrderEvent(`type`, product_id, sequence.get,
-      time.map(util.time.ISO8601ToMicros).get, size.map(_.toDouble), price.map(_.toDouble), order_id,
+      time.map(TimeFmt.ISO8601ToMicros).get, size.map(_.toDouble), price.map(_.toDouble), order_id,
       side, reason, order_type, remaining_size.map(_.toDouble), funds.map(_.toDouble), trade_id,
       maker_order_id, taker_order_id, taker_user_id, user_id, taker_profile_id, profile_id,
       new_size.map(_.toDouble), old_size.map(_.toDouble), new_funds.map(_.toDouble),

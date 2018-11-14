@@ -2,13 +2,13 @@ package io.flashbook.flashbot.core
 
 import java.time.{Duration, Instant, ZoneOffset, ZonedDateTime}
 
-import io.flashbook.flashbot.core.Utils.parseDuration
+import io.flashbook.flashbot.util
 import org.ta4j.core.{BaseTimeSeries, TimeSeries}
 
 class TimeSeriesGroup(period: Duration) {
 
   def this(periodStr: String) =
-    this(Duration.ofNanos(parseDuration(periodStr).toNanos))
+    this(Duration.ofNanos(util.time.parseDuration(periodStr).toNanos))
 
   var allSeries: Map[String, TimeSeries] = Map.empty
 

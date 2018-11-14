@@ -8,15 +8,15 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.Timeout
 import io.circe.Json
+import io.circe.syntax._
 import io.circe.parser.parse
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core.Exchange.ExchangeConfig
-import io.flashbook.flashbot.report.Report
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util.time.currentTimeMicros
 import io.flashbook.flashbot.util.stream.buildMaterializer
 import io.flashbook.flashbot.engine.TradingSession._
-import io.flashbook.flashbot.report.{BalanceEvent, Report, ReportDelta, ReportEvent}
+import io.flashbook.flashbot.report._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
@@ -74,7 +74,7 @@ class TradingEngine(dataDir: String,
           val (ref, fut) = Source
             .actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
             .toMat(Sink.foreach { event =>
-              println("Processing bot session event")
+//              println("Processing bot session event")
               self ! ProcessBotSessionEvent(name, event)
             })(Keep.both)
             .run
@@ -97,7 +97,9 @@ class TradingEngine(dataDir: String,
             Report.empty(strategy, params)
           )
       }
-      Right(EngineStarted(currentTimeMicros, defaultBots.keySet) :: Nil)
+//      val foo: Set[String] = defaultBots.keys.toSet
+      val bots: Seq[String] = defaultBots.foldLeft(Seq.empty[String])((memo, item) => memo :+ item._1)
+      Right(EngineStarted(currentTimeMicros, bots) :: Nil)
 
     /**
       * A wrapper around a new SessionActor, which runs the actual strategy. This may be initiated
@@ -110,7 +112,7 @@ class TradingEngine(dataDir: String,
         mode,
         sessionEventsRef,
         initialBalances,
-        report
+        initialReport
     ) =>
 
       val sessionActor = context.actorOf(Props(new SessionActor(
@@ -122,7 +124,8 @@ class TradingEngine(dataDir: String,
         strategyParams,
         mode,
         sessionEventsRef,
-        initialBalances
+        initialBalances,
+        initialReport
       )))
 
       // Start the session. We are only waiting for an initialization error, or a confirmation
@@ -133,7 +136,7 @@ class TradingEngine(dataDir: String,
           Await.result(sessionActor ? "start", timeout.duration) match {
             case (sessionId: String, micros: Long) =>
               Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
-                mode, micros, initialBalances, report) :: Nil)
+                mode, micros, initialBalances, initialReport) :: Nil)
             case err: EngineError =>
               println("error on left", err)
               Left(err)
@@ -162,8 +165,6 @@ class TradingEngine(dataDir: String,
       val deltas = state.bots(botId).last.report.genDeltas(event)
         .map(ReportUpdated(botId, _))
         .toList
-
-      println("processing bot session event", event, deltas)
 
       Right(event match {
         case BalanceEvent(account, balance, micros) =>
@@ -227,9 +228,10 @@ class TradingEngine(dataDir: String,
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
         * all session events into a stream that we fold over to create a report.
         */
-      case BacktestQuery(strategyName, params, timeRange, balancesStr, barSize) =>
+      case BacktestQuery(strategyName, params, timeRange, balancesStr, barSize, reportUpdates) =>
 
         try {
+
           // TODO: Handle parse errors
           val paramsJson = parse(params).right.get
           val report = Report.empty(strategyName, paramsJson, barSize)
@@ -245,14 +247,31 @@ class TradingEngine(dataDir: String,
           // Fold the empty report over the ReportEvents emitted from the session.
           val (ref: ActorRef, fut: Future[Report]) =
             Source.actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
-              .toMat(Sink.fold[Report, ReportEvent](report) {
-                (report, event) => report.genDeltas(event).foldLeft(report)(_.update(_))
-              })(Keep.both)
+              .scan[(Report, scala.Seq[Json])]((report, Seq.empty))((r, ev) => {
+                implicit var newReport = r._1
+                val deltas = r._1.genDeltas(ev)
+                var jsonDeltas = Seq.empty[Json]
+                deltas.foreach { delta =>
+                  jsonDeltas :+= delta.asJson
+                }
+                (deltas.foldLeft(r._1)(_.update(_)), jsonDeltas)
+              })
+              // Send the report deltas to the client if requested.
+              .alsoTo(Sink.foreach(rd => {
+                if (reportUpdates) {
+                  rd._2.foreach(sender ! _)
+                }
+              }))
+              .map(_._1)
+              .toMat(Sink.last)(Keep.both)
               .run
+
+          // Always send the initial report back to let the client know we started the backtest.
+          sender ! report
 
           // Start the trading session
           processCommand(StartTradingSession(None, strategyName, paramsJson,
-            Backtest(timeRange), ref, balances, report)) match {
+              Backtest(timeRange), ref, balances, report)) match {
             case Left(err: EngineError) =>
               throw err
             case Right(events: Seq[Event]) =>
@@ -352,7 +371,7 @@ object TradingEngine {
                             micros: Long,
                             balances: Map[Account, Double],
                             report: Report) extends Event
-  case class EngineStarted(micros: Long, withBots: Set[String]) extends Event
+  case class EngineStarted(micros: Long, withBots: Seq[String]) extends Event
 
   sealed trait SessionUpdated extends Event {
     def botId: String
@@ -363,15 +382,14 @@ object TradingEngine {
                              account: Account,
                              balance: Double) extends SessionUpdated
 
-
-
   sealed trait Query
   case object Ping extends Query
   case class BacktestQuery(strategyName: String,
                            params: String,
                            timeRange: TimeRange,
                            balances: String,
-                           barSize: Option[Duration]) extends Query
+                           barSize: Option[Duration],
+                           reportUpdates: Boolean = false) extends Query
 
   case class BotReportQuery(botId: String) extends Query
   case class BotReportsQuery() extends Query

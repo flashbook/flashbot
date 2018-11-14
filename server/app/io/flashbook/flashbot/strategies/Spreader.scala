@@ -1,11 +1,10 @@
 package io.flashbook.flashbot.strategies
 
 import io.circe.Json
-import io.flashbook.flashbot.core
+import io.circe.generic.auto._
 import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core._
-import io.circe.generic.auto._
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD}
+import io.flashbook.flashbot.core.AggBook._
 import io.flashbook.flashbot.engine.TradingSession
 
 class Spreader extends Strategy {
@@ -23,6 +22,7 @@ class Spreader extends Strategy {
 
   override def handleData(data: MarketData)(implicit ctx: TradingSession) = data match {
     case md: AggBookMD =>
-      putValue(md.topic, md.data)
+      println(md.micros, md.data.spread)
+//      val spreadBook = "spread_book".get[AggBook]
   }
 }

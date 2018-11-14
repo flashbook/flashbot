@@ -1,6 +1,6 @@
 package io.flashbook.flashbot.core
 
-import io.circe.Json
+import io.circe.{Decoder, Encoder, Json}
 import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.engine.TradingSession._
@@ -15,6 +15,7 @@ import io.flashbook.flashbot.report._
   * possibly written in other languages.
   */
 abstract class Strategy {
+
 
   val DEFAULT = "default"
 
@@ -48,20 +49,6 @@ abstract class Strategy {
     * Receives commands that occur from outside of the system, such as from the UI or API.
     */
   def handleCommand(command: StrategyCommand)(implicit ctx: TradingSession): Unit = {}
-
-  def putValue[T <: ReportValue[T]](key: String, value: T)(implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(PutValueEvent(key, value)))
-  }
-
-  def updateValue[T <: CanDeltaUpdate](key: String, value: T)
-                                      (delta: value.Delta)
-                                      (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(UpdateValueEvent(key, value.deltaEncoder(delta))))
-  }
-
-  def removeValue(key: String)(implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(RemoveValueEvent(key)))
-  }
 
   def orderTargetRatio(exchangeName: String,
                        product: String,
@@ -128,6 +115,13 @@ abstract class Strategy {
   }
 
   def resolveAddress(address: Address): Option[Iterator[MarketData]] = None
+
+  /**
+    * Internal state that is used for bookkeeping by the Var type classes. This will be set
+    * directly by the TradingSession initialization code.
+    */
+  var buffer: Option[VarBuffer] = None
+  implicit def internalStrategyState = buffer.get
 }
 
 object Strategy {

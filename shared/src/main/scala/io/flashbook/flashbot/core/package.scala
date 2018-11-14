@@ -1,14 +1,43 @@
 package io.flashbook.flashbot
 
+import java.time.Instant
+import scala.concurrent.duration._
+
 import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
+import io.flashbook.flashbot.util.time.parseDuration
 import io.circe.Json
-import io.circe.generic.auto._
 import io.flashbook.flashbot.util.parseProductId
+
+import scala.concurrent.duration.{Duration, FiniteDuration}
+
+import io.circe.generic.auto._
 
 package object core {
 
   case class TimeRange(from: Long, to: Long = Long.MaxValue)
+  object TimeRange {
+    def build(now: Instant, from: String, to: String): TimeRange = {
+      val fromT = parseTime(now, from)
+      val toT = parseTime(now, to)
+      (fromT, toT) match {
+        case (Right(inst), Left(dur)) => TimeRange(
+          inst.toEpochMilli * 1000,
+          inst.plusMillis(dur.toMillis).toEpochMilli * 1000)
+        case (Left(dur), Right(inst)) => TimeRange(
+          inst.minusMillis(dur.toMillis).toEpochMilli * 1000,
+          inst.toEpochMilli * 1000)
+      }
+    }
+  }
+
+  def parseTime(now: Instant, str: String): Either[Duration, Instant] = {
+    if (str == "now") {
+      Right(now)
+    } else {
+      Left(parseDuration(str))
+    }
+  }
 
   sealed trait PairRole
   case object Base extends PairRole

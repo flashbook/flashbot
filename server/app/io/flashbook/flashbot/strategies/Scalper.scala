@@ -57,7 +57,8 @@ class Scalper extends Strategy {
         val returns = 1 - price / entry.get._2
         val shouldTake = returns > 0 && returns > params.get.take
         val shouldStop = returns < 0 && -returns > params.get.stop
-        val timeLimitReached = (md.micros - entry.get._1) > util.parseDuration(params.get.limit).toMicros
+        val timeLimitReached = (md.micros - entry.get._1) >
+          util.time.parseDuration(params.get.limit).toMicros
 
         if (shouldTake || shouldStop || timeLimitReached) {
           orderTargetRatio(params.get.exchange, product.toString, -1)

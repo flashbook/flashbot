@@ -1,7 +1,7 @@
 package io.flashbook.flashbot.util
 
-import io.circe.{Decoder, Encoder, Json, Printer}
-import io.circe.parser.parse
+import io.circe._
+import io.circe.parser._
 import io.circe.syntax._
 
 package object json {
@@ -17,7 +17,7 @@ package object json {
     }
   }
 
-  private val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
+  val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
   def printJson(json: Json): String = printer.pretty(json)
   def printJson[T](t: T)(implicit en: Encoder[T]): String = printJson(t.asJson)
 

@@ -16,7 +16,7 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
     "com.vmunier" %% "scalajs-scripts" % "1.1.2",
     "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
     "com.lihaoyi" %% "fansi" % "0.2.5",
-    guice,
+    guice, ws,
     specs2 % Test
   )),
   // Compile the project before generating Eclipse files, so that generated .scala or .class files for views and routes are present
@@ -26,14 +26,15 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
 
 lazy val client = (project in file("client")).settings(commonSettings).settings(
   resolvers += "Apollo Bintray" at "https://dl.bintray.com/apollographql/maven/",
-  scalaJSUseMainModuleInitializer := true,
   libraryDependencies ++= Seq(
     "org.scala-js" %%% "scalajs-dom" % "0.9.5",
     "com.apollographql" %%% "apollo-scalajs-react" % "0.4.3",
     "me.shadaj" %%% "slinky-core" % "0.5.1", // core React functionality, no React DOM
     "me.shadaj" %%% "slinky-web" % "0.5.1", // React DOM, HTML and SVG tags
     "me.shadaj" %%% "slinky-hot" % "0.5.1", // Hot loading, requires react-proxy package
+    "org.scala-js" %%% "scalajs-java-time" % "0.2.5"
   ),
+  scalaJSUseMainModuleInitializer := true,
   scalacOptions += "-P:scalajs:sjsDefinedByDefault",
   addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full),
   webpackDevServerExtraArgs := Seq("--inline", "--hot"),
@@ -65,8 +66,8 @@ lazy val sharedJvm = shared.jvm
 lazy val sharedJs = shared.js
 
 
-lazy val akkaVersion = "2.5.11"
-lazy val akkaHttpVersion = "10.1.0"
+lazy val akkaVersion = "2.5.18"
+lazy val akkaHttpVersion = "10.1.5"
 lazy val circeVersion = "0.10.0"
 
 
@@ -105,11 +106,6 @@ lazy val graphQLServerDeps = List(
 )
 
 lazy val jsonDeps = List(
-  "io.circe" %% "circe-core" % circeVersion,
-  "io.circe" %% "circe-generic" % circeVersion,
-  "io.circe" %% "circe-parser" % circeVersion,
-  "io.circe" %% "circe-optics" % circeVersion,
-  "io.circe" %% "circe-literal" % circeVersion
 )
 
 lazy val dataStores = List(
@@ -137,7 +133,13 @@ lazy val statsDeps = List(
 lazy val commonSettings = Seq(
   scalaVersion := "2.12.5",
   organization := "io.flashbook",
-  libraryDependencies ++= jsonDeps
+  libraryDependencies ++= Seq(
+    "io.circe" %%% "circe-core" % circeVersion,
+    "io.circe" %%% "circe-generic" % circeVersion,
+    "io.circe" %%% "circe-parser" % circeVersion,
+    "io.circe" %%% "circe-optics" % circeVersion,
+    "io.circe" %%% "circe-literal" % circeVersion
+  )
 )
 
 // loads the server project at sbt startup

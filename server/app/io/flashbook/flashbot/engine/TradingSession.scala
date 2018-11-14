@@ -13,7 +13,8 @@ import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.core.Exchange.ExchangeConfig
 import io.flashbook.flashbot.core.Order.{Buy, Fill, Sell}
 import io.flashbook.flashbot.util.stream._
-import io.flashbook.flashbot.util.time.{currentTimeMicros, formatDate}
+import io.flashbook.flashbot.util.time.currentTimeMicros
+import io.flashbook.flashbot.util.time.TimeFmt._
 import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.TradingEngine.EngineError
@@ -78,7 +79,8 @@ object TradingSession {
                      strategyParams: Json,
                      mode: Mode,
                      sessionEventsRef: ActorRef,
-                     initialBalances: Map[Account, Double]) extends Actor with ActorLogging {
+                     initialBalances: Map[Account, Double],
+                     initialReport: Report) extends Actor with ActorLogging {
 
 //    implicit val ec: ExecutionContext =
 //      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
@@ -116,6 +118,7 @@ object TradingSession {
       // Instantiate the strategy
       try {
         strategyOpt = Some(strategyClassOpt.get.newInstance)
+//        strategyOpt.get.buffer = Some(new VarBuffer(initialReport.values.mapValues(_.value)))
       } catch {
         case err: Throwable =>
           return Left(EngineError(s"Strategy instantiation error: $strategyKey", Some(err)))
@@ -161,7 +164,6 @@ object TradingSession {
       // Initialize the strategy and collect the data source addresses it returns
       var dataSourceAddresses = Seq.empty[Address]
       try {
-        println("** 1")
         // TODO: Should we hide data source config expansion behind a flag?
         // Or be smart about it some other way?
 
@@ -277,14 +279,11 @@ object TradingSession {
                            prices: Map[Market, Double] = Map.empty,
                            orderManagers: Map[String, OrderManager] =
                               markets.mapValues(_ => OrderManager()),
-
                            // Create action queue for every exchange
                            actionQueues: Map[String, ActionQueue] = markets
                              .mapValues(_ => ActionQueue()),
-
                            emittedReportEvents: Seq[ReportEvent] = Seq.empty,
                            hedges: mutable.Map[String, Double] = mutable.Map.empty)
-
           extends TradingSession {
 
           override val id: String = sessionId
@@ -302,13 +301,14 @@ object TradingSession {
                   case target: OrderTarget =>
                     targets = targets.enqueue(target)
 
-                  case SessionReportEvent(event: TimeSeriesEvent) =>
-                    // Gauge event coming from a strategy, so we'll prefix the name with "local"
-                    // to prevent naming conflicts.
-                    reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
-
-                  case SessionReportEvent(event: TimeSeriesCandle) =>
-                    reportEvents = reportEvents.enqueue(event.copy(key = "local." + event.key))
+                  case SessionReportEvent(reportEvent) =>
+                    reportEvents = reportEvents.enqueue(reportEvent match {
+                      case tsEvent: TimeSeriesEvent =>
+                        tsEvent.copy(key = "local." + tsEvent.key)
+                      case tsCandle: TimeSeriesCandle =>
+                        tsCandle.copy(key = "local." + tsCandle.key)
+                      case otherReportEvent => otherReportEvent
+                    })
 
                   case msg: LogMessage =>
                     // TODO: This should save to a time log, not log to stdout...

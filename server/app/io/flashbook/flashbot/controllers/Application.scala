@@ -1,8 +1,9 @@
 package io.flashbook.flashbot.controllers
 
+import java.time.Instant
+
 import akka.actor.ActorSystem
 import akka.stream.Materializer
-import io.flashbook.flashbot.server.BotSocket
 import io.flashbook.flashbot.service.Control
 import javax.inject._
 import io.flashbook.flashbot.shared.SharedMessages
@@ -11,7 +12,9 @@ import play.api.mvc._
 import akka.pattern.pipe
 import akka.pattern.ask
 import akka.util.Timeout
-import io.flashbook.flashbot.engine.TradingEngine.{BotSessionsResponse, EngineError}
+import io.flashbook.flashbot.api.{BacktestSocket, BotSocket}
+import io.flashbook.flashbot.core.TimeRange
+import io.flashbook.flashbot.engine.TradingEngine._
 import io.flashbook.flashbot.engine.TradingEngine
 
 import scala.concurrent.duration._
@@ -30,7 +33,34 @@ class Application @Inject()(cc: ControllerComponents)
     Ok(views.html.index(SharedMessages.itWorks))
   }
 
-  // Grab the latest session for the bot.
+  /**
+    * Visiting the backtest page spins up a new backtest in the trading engine. First we check to
+    * ensure the given strategy exists and load the page. The JS on the page creates an empty
+    * Report instance and connects to the server via WebSocket. It sends the command to start the
+    * trading session, and then receives report update events. It folds over the report events to
+    * reconstruct and render it in React. When the backtest is over, the WebSocket is automatically
+    * closed by the server.
+    */
+  def backtest(strategy: String) = Action.async {
+    (Control.engine.get ? StrategiesQuery()).map {
+      case StrategiesResponse(strats: Seq[StrategyResponse]) =>
+        if (strats.map(_.name).contains(strategy))
+          Ok(views.html.backtest(strategy))
+        else Ok(views.html.error(s"Unknown strategy $strategy"))
+      case EngineError(message, cause) =>
+        Ok(views.html.error(message, cause.map(_.getStackTrace)))
+    }
+  }
+
+  def backtestWS(strategy: String, from: String, to: String, balances: String): WebSocket =
+    WebSocket.accept[String, String] { request =>
+      ActorFlow.actorRef { out => BacktestSocket.props(strategy,
+        TimeRange.build(Instant.now, from, to), balances, out) }
+    }
+
+  /**
+    * Visiting the bot page connects to a running bot.
+    */
   def bot(bot: String) = Action.async {
     (Control.engine.get ? TradingEngine.BotSessionsQuery(bot)).map {
       case BotSessionsResponse(_, sessions) =>

@@ -6,6 +6,7 @@ import io.circe.{Decoder, Encoder, KeyDecoder, KeyEncoder}
 import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
 import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core._
 
 import scala.collection.immutable.{SortedMap, TreeMap}
 
@@ -19,23 +20,18 @@ object AggBook {
     override def apply(key: String): Option[Double] = Some(key.toDouble)
   }
 
+  case class AggDelta(side: QuoteSide, priceLevel: Double, quantity: Double)
+  object AggDelta {
+    implicit def en: Encoder[AggDelta] = deriveEncoder
+    implicit def de: Decoder[AggDelta] = deriveDecoder
+  }
+
   case class AggBook(depth: Int,
                      asks: SortedMap[Double, Double] = TreeMap.empty,
-                     bids: SortedMap[Double, Double] = TreeMap.empty(Ordering.by(-_)))
-    extends CanDeltaUpdate {
-
-    case class Delta(side: QuoteSide, priceLevel: Double, quantity: Double)
-
-    override def deltaEncoder = implicitly[Encoder[Delta]]
-    override def deltaDecoder = implicitly[Decoder[Delta]]
+                     bids: SortedMap[Double, Double] = TreeMap.empty(Ordering.by(-_))) {
 
     assert(asks.isEmpty || asks.firstKey > asks.lastKey, "Asks out of order")
     assert(bids.isEmpty || bids.firstKey > bids.lastKey, "Bids out of order")
-
-    override def update(delta: Delta) = delta match {
-      case Delta(side, priceLevel, quantity) =>
-        updateLevel(side, priceLevel, quantity)
-    }
 
     def updateLevel(side: QuoteSide, priceLevel: Double, quantity: Double): AggBook =
       side match {
@@ -44,11 +40,6 @@ object AggBook {
         case Ask =>
           copy(asks = updateMap(asks, priceLevel, quantity))
       }
-
-//    def convertToTreeMaps: AggBook = copy(
-//      asks = toTreeMap(asks, reverse = false),
-//      bids = toTreeMap(bids, reverse = true)
-//    )
 
     def spread: Option[Double] = {
       if (asks.isEmpty || bids.isEmpty) None

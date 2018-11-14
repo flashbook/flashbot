@@ -12,8 +12,6 @@ import io.flashbook.flashbot.engine.TradingEngine.StrategyResponse
 import io.flashbook.flashbot.report.{Report, TradeEvent}
 import sangria.schema._
 import sangria.macros.derive._
-import sangria.marshalling.FromInput
-import sangria.marshalling.circe._
 
 object GraphQLSchema {
   def build(): Schema[UserCtx, Unit] = {
