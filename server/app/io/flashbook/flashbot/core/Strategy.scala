@@ -16,6 +16,7 @@ import io.flashbook.flashbot.util.parseProductId
   */
 abstract class Strategy {
 
+  type Props
 
   val DEFAULT = "default"
 

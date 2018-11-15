@@ -6,6 +6,7 @@ import io.circe.generic.auto._
 import io.circe.generic.semiauto._
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.core.Candle
+import io.flashbook.flashbot.util.time._
 import io.flashbook.flashbot.report.Report.{ReportValue, ValuesMap}
 import io.flashbook.flashbot.report.ReportDelta._
 import io.flashbook.flashbot.report.ReportEvent._
@@ -145,8 +146,12 @@ object Report {
       }
   }
 
-  implicit val reportEn: Encoder[Report] = implicitly[Encoder[Report]]
-  implicit val reportDe: Decoder[Report] = implicitly[Decoder[Report]]
+  implicit val reportEn: Encoder[Report] = Encoder.forProduct7(
+    "strategy", "params", "barSize", "trades", "collections", "timeSeries", "values")(r =>
+      (r.strategy, r.params, r.barSize, r.trades, r.collections, r.timeSeries, r.values))
+  implicit val reportDe: Decoder[Report] = Decoder.forProduct7(
+    "strategy", "params", "barSize", "trades", "collections",
+    "timeSeries", "values")(Report.apply)
 
   def empty(strategyName: String,
             params: Json,

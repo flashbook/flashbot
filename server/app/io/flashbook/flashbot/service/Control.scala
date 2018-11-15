@@ -10,7 +10,7 @@ import io.circe.Json
 import io.circe.parser.parse
 import io.circe.generic.auto._
 import io.flashbook.flashbot.engine.TradingEngine.StartEngine
-import io.flashbook.flashbot.engine.{IngestService, TradingSession}
+import io.flashbook.flashbot.engine.{IngestService, TradingEngine, TradingSession}
 import io.flashbook.flashbot.util.stream.buildMaterializer
 
 import scala.concurrent.{ExecutionContext, Future, SyncVar}
@@ -77,7 +77,7 @@ object Control {
     // Start the TradingEngine
     if (!engine.isSet) {
       engine.put(sys.actorOf(
-        Props(new TradingSession(
+        Props(new TradingEngine(
           List(dataPath, "sources").mkString("/"),
           flashbotConfig.strategies,
           finalDataSources,

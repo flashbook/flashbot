@@ -1,6 +1,7 @@
 package io.flashbook.flashbot.engine
 
 import java.io.File
+import java.time.Instant
 import java.util
 
 import io.circe.{Decoder, Encoder, Printer}
@@ -8,11 +9,17 @@ import io.flashbook.flashbot.core.Timestamped
 import net.openhft.chronicle.bytes.Bytes
 import net.openhft.chronicle.core.time.TimeProvider
 import net.openhft.chronicle.queue._
-import net.openhft.chronicle.queue.impl.StoreFileListener
+import net.openhft.chronicle.queue.impl.{RollingResourcesCache, StoreFileListener}
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder
+import net.openhft.chronicle.queue.impl.single.SingleChronicleQueue
 import net.openhft.chronicle.threads.Pauser
 
+import scala.Option
+import scala.concurrent.duration._
+
 object TimeLog {
+
+  val SUFFIX = SingleChronicleQueue.SUFFIX
 
   sealed trait ScanDuration
   object ScanDuration {
@@ -20,22 +27,15 @@ object TimeLog {
     case object Continuous extends ScanDuration
   }
 
-  class ResourceManager extends StoreFileListener {
-    override def onReleased(cycle: Int, file: File): Unit = {
-      // TODO: Do retention things here
-//      println("file released", cycle, file)
-    }
-  }
-
-  private val defaultResourceManager = new ResourceManager
-
   trait NextMsgReader {
     def read(tailer: ExcerptTailer, pauser: Pauser): Option[String]
   }
 
   object NoPollingReader extends NextMsgReader {
     override def read(tailer: ExcerptTailer, pauser: Pauser): Option[String] =
-      Option(tailer.readText())
+      {
+        Option(tailer.readText())
+      }
   }
 
   object PollingReader extends NextMsgReader {
@@ -53,30 +53,74 @@ object TimeLog {
     }
   }
 
-  def apply[T <: Timestamped](path: File): TimeLog[T] = new TimeLog[T](path)
+  def apply[T <: Timestamped](path: File): TimeLog[T] = TimeLog[T](path, 30 days)
+  def apply[T <: Timestamped](path: File, duration: Duration): TimeLog[T] =
+    TimeLog[T](path, duration, RollCycles.DAILY)
+  def apply[T <: Timestamped](path: File, duration: Duration,
+                              rollCycle: RollCycle): TimeLog[T] =
+    new TimeLog[T](path, duration, rollCycle)
 
-  class TimeLog[T <: Timestamped](path: File) {
+  class TimeLog[T <: Timestamped](path: File,
+                                  retention: Duration,
+                                  rollCycle: RollCycle) {
 
     import io.circe.parser._
     import io.circe.syntax._
 
-    private val RetentionPeriod = 1000 * 60 * 60 * 24 * 30
+    private val queueBuilder = SingleChronicleQueueBuilder.single(path)
+      .rollCycle(rollCycle)
+      .timeProvider(TimestampProvider)
+      .storeFileListener(new ResourceManager(retention))
+    private val queue = queueBuilder.build()
 
-    private def microsToMillis(micros: Long) = math.floor(micros.toDouble / 1000).toLong
     var lastMessage: Option[T] = None
     var inFlightMessage: Option[T] = None
+
 
     object TimestampProvider extends TimeProvider {
       override def currentTimeMillis: Long =
         inFlightMessage.orElse(lastMessage).map(x => microsToMillis(x.micros)).getOrElse(0)
     }
 
-    private val queue = SingleChronicleQueueBuilder
-      .binary(path)
-      .rollCycle(RollCycles.DAILY)
-      .timeProvider(TimestampProvider)
-      .storeFileListener(defaultResourceManager)
-      .build()
+    // `fileIdParser` will parse a given filename to its long value.
+    // The value is based on epoch time and grows incrementally.
+    // https://github.com/OpenHFT/Chronicle-Queue/blob/chronicle-queue-4.16.5/src/main/java/net/openhft/chronicle/queue/RollCycles.java#L85
+    private val fileIdParser = new RollingResourcesCache(queue.rollCycle(), queue.epoch(),
+      (name: String) => new File(queueBuilder.path(), name + SUFFIX),
+      (file: File) => file.getName.stripSuffix(SUFFIX)
+    )
+
+    private def fileIsOutdated(file: File): Boolean = {
+      val fileCycle = fileIdParser.toLong(file).toLong
+      val currentCycle = rollCycle.current(TimestampProvider, queueBuilder.epoch)
+      val cycleDiff = currentCycle - fileCycle
+      val diff = cycleDiff * rollCycle.length
+      println(diff, retention.toMillis)
+      diff > retention.toMillis
+    }
+
+    private def microsToMillis(micros: Long) = math.floor(micros.toDouble / 1000).toLong
+    class ResourceManager(retention: Duration) extends StoreFileListener {
+      override def onAcquired(cycle: Int, file: File) = {
+        super.onAcquired(cycle, file)
+      }
+
+      override def onReleased(cycle: Int, thisFile: File) = {
+        println("File released", thisFile)
+        for {
+          allFiles <- Option(path.listFiles).toSeq
+          file <- allFiles
+          if file.getName.endsWith(SUFFIX) && fileIsOutdated(file)
+        } {
+          val path = file.getPath
+          if (file.delete()) {
+            println(s"Deleted $path")
+          } else {
+            println(s"WARNING: Failed to delete ${file.getPath}")
+          }
+        }
+      }
+    }
 
     private val pauser = Pauser.balanced()
 
@@ -85,7 +129,7 @@ object TimeLog {
     def enqueue(msg: T)(implicit en: Encoder[T]): Unit = {
       inFlightMessage = Some(msg)
       val appender: ExcerptAppender = queue.acquireAppender
-      appender.writeBytes(Bytes.fromString(printer.pretty(msg.asJson)))
+      appender.writeText(printer.pretty(msg.asJson))
       pauser.unpause()
       lastMessage = inFlightMessage
       inFlightMessage = None
@@ -104,8 +148,7 @@ object TimeLog {
           return true
         }
 
-        val tmpNext = reader
-          .read(tailer, pauser)
+        val tmpNext = reader.read(tailer, pauser)
           .map(decode[T])
           .map(_.right.get)
         if (tmpNext.isDefined && shouldContinue(tmpNext.get)) {
@@ -156,7 +199,6 @@ object TimeLog {
 //    }
 
     def close(): Unit = {
-//      println("CLOSING")
       queue.close()
     }
 

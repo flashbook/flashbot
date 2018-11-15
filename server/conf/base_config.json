@@ -518,7 +518,8 @@
     "secret_c": "io.flashbook.flashbot.strategies.SecretC",
     "secret_d": "io.flashbook.flashbot.strategies.SecretD",
     "limit_test": "io.flashbook.flashbot.strategies.LimitOrderTest",
-    "hanek_strat": "io.flashbook.flashbot.strategies.HanekStrat"
+    "hanek_strat": "io.flashbook.flashbot.strategies.HanekStrat",
+    "spreader": "io.flashbook.flashbot.strategies.Spreader"
   },
 
   "currencies": {

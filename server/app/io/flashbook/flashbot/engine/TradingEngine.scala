@@ -116,7 +116,7 @@ class TradingEngine(dataDir: String,
         initialReport
     ) =>
 
-      val sessionActor = context.actorOf(Props(new SessionActor(
+      val sessionActor = context.actorOf(Props(new TradingSessionActor(
         dataDir,
         strategyClassNames,
         dataSourceConfigs,

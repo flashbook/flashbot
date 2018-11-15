@@ -1,8 +1,9 @@
 package io.flashbook.flashbot.util
 
-
 import java.util.concurrent.TimeUnit.{DAYS, HOURS, MILLISECONDS, MINUTES, SECONDS}
-import scala.concurrent.duration.FiniteDuration
+import io.circe._
+import io.circe.syntax._
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.util.matching.Regex
 
 
@@ -19,9 +20,33 @@ package object time {
     case minuteFmt(len: String) => Some(FiniteDuration(len.toInt, MINUTES))
     case hourFmt(len: String) => Some(FiniteDuration(len.toInt, HOURS))
     case dayFmt(len: String) => Some(FiniteDuration(len.toInt, DAYS))
+    case _ => None
   }
 
   def parseDuration(str: String): FiniteDuration = parseDurationOpt(str).get
+
+  def printDurationOpt(d: FiniteDuration): Option[String] = (d.length, d.unit) match {
+    case (n, MILLISECONDS) => Some(s"${n}ms")
+    case (n, SECONDS) => Some(s"${n}s")
+    case (n, MINUTES) => Some(s"${n}m")
+    case (n, HOURS) => Some(s"${n}h")
+    case (n, DAYS) => Some(s"${n}d")
+  }
+
+  def printDuration(d: FiniteDuration) = printDurationOpt(d).get
+
+  implicit val durationEncoder: Encoder[Duration] = new Encoder[Duration] {
+    override def apply(a: Duration) = a match {
+      case fd: FiniteDuration => printDuration(fd).asJson
+    }
+  }
+
+  implicit val durationDecoder: Decoder[Duration] = new Decoder[Duration] {
+    override def apply(c: HCursor) = {
+      val strDecoder = Decoder[String]
+      strDecoder(c).right.map(parseDuration)
+    }
+  }
 
   def currentTimeMicros: Long = System.currentTimeMillis * 1000
 }

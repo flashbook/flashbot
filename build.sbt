@@ -108,8 +108,8 @@ lazy val jsonDeps = List(
 )
 
 lazy val dataStores = List(
-  "net.openhft" % "chronicle-queue" % "4.6.99",
-  "net.openhft" % "chronicle-map" % "3.14.5"
+  "net.openhft" % "chronicle-queue" % "5.17.1",
+  "net.openhft" % "chronicle-map" % "3.16.4"
 )
 
 lazy val serviceDeps = List(
