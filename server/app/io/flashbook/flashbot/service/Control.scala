@@ -46,9 +46,11 @@ object Control {
       .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
       .getLines.mkString).right.get
 
-    val flashbotConfig = baseConfigJson
-      .deepMerge(parse(Source.fromFile("config.json", "utf-8").getLines.mkString).right.get)
-      .as[ConfigFile].right.get
+
+    val flashbotConfig = baseConfigJson.as[ConfigFile].right.get
+//    val flashbotConfig = baseConfigJson
+//      .deepMerge(parse(Source.fromFile("config.json", "utf-8").getLines.mkString).right.get)
+//      .as[ConfigFile].right.get
 
     def getStringListOpt(path: String): Option[Seq[String]] =
       if (config.getIsNull(path)) None else Some(config.getStringList(path).asScala)
