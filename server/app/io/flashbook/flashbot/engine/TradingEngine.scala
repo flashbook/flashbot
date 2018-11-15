@@ -2,6 +2,8 @@ package io.flashbook.flashbot.engine
 
 import akka.Done
 import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
+import akka.cluster.{Cluster, Member}
+import akka.cluster.ClusterEvent._
 import akka.pattern.{ask, pipe}
 import akka.persistence._
 import akka.stream.scaladsl.{Keep, Sink, Source}
@@ -32,15 +34,23 @@ class TradingEngine(dataDir: String,
                     dataSourceConfigs: Map[String, DataSourceConfig],
                     exchangeConfigs: Map[String, ExchangeConfig],
                     defaultBots: Map[String, BotConfig])
-  extends PersistentActor with ActorLogging {
+  extends PersistentActor with ActorLogging with ClusterMemberManager {
+
+  import TradingEngine._
+  import scala.collection.immutable.Seq
 
   implicit val system: ActorSystem = context.system
   implicit val mat: ActorMaterializer = buildMaterializer
   implicit val ec: ExecutionContext = system.dispatcher
 
-  import TradingEngine._
+  val cluster = Cluster(system)
 
-  import scala.collection.immutable.Seq
+  override def preStart() = {
+    cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
+      classOf[MemberEvent], classOf[UnreachableMember])
+  }
+
+  override def postStop() = cluster.unsubscribe(self)
 
   val snapshotInterval = 100000
   var state = EngineState(Map.empty)
@@ -178,7 +188,6 @@ class TradingEngine(dataDir: String,
     * doesn't grow out of bounds.
     */
   override def receiveCommand: Receive = {
-
     case err: EngineError =>
       log.error(err, "Uncaught EngineError")
 

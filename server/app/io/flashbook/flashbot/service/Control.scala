@@ -10,7 +10,7 @@ import io.circe.Json
 import io.circe.parser.parse
 import io.circe.generic.auto._
 import io.flashbook.flashbot.engine.TradingEngine.StartEngine
-import io.flashbook.flashbot.engine.{IngestService, TradingEngine, TradingSession}
+import io.flashbook.flashbot.engine.{DataServer, IngestService, TradingEngine, TradingSession}
 import io.flashbook.flashbot.util.stream.buildMaterializer
 
 import scala.concurrent.{ExecutionContext, Future, SyncVar}
@@ -26,7 +26,7 @@ object Control {
   appStarted.put(false)
 
   val engine = new SyncVar[ActorRef]
-//  val system = new SyncVar[ActorSystem]
+  val dataServer = new SyncVar[ActorRef]
 
   def start()(implicit config: Config, app: Application, system: ActorSystem): Unit = {
     val dataPath = config.getString("flashbot.dataPath")
@@ -71,33 +71,43 @@ object Control {
     implicit val ec: ExecutionContext = system.dispatcher
 
     // Start a TradingEngine
-    if (!engine.isSet) {
-      engine.put(system.actorOf(
-        Props(new TradingEngine(
-          List(dataPath, "sources").mkString("/"),
-          flashbotConfig.strategies,
-          finalDataSources,
-          flashbotConfig.exchanges,
-          finalBots
-          )),
-        "trading-engine"
-      ))
-      engine.get ! StartEngine
-    } else {
-      println("Warning: Flashbot engine already started.")
+    val roles = getStringListOpt("akka.cluster.roles").get
+    if (roles.contains("trading-engine")) {
+      if (!engine.isSet) {
+        engine.put(system.actorOf(Props(
+          new TradingEngine(
+            List(dataPath, "sources").mkString("/"),
+            flashbotConfig.strategies,
+            finalDataSources,
+            flashbotConfig.exchanges,
+            finalBots
+          )
+        ), "trading-engine"))
+        engine.get ! StartEngine
+      } else {
+        println("Warning: Flashbot engine already started.")
+      }
     }
 
     // Start a DataServer
-    finalDataSources.keySet.foreach(srcName => {
-      val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
-      actor ! (
-        srcName,
-        List(dataPath, "sources").mkString("/"),
-        finalDataSources,
-        activeTopics.toSet,
-        activeDataTypes.toSet
-      )
-    })
+    if (roles.contains("data-server")) {
+      if (!dataServer.isSet) {
+        dataServer.put(system.actorOf(Props(
+          new DataServer()
+        ), "data-server"))
+      }
+
+//      finalDataSources.keySet.foreach(srcName => {
+//        val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
+//        actor ! (
+//          srcName,
+//          List(dataPath, "sources").mkString("/"),
+//          finalDataSources,
+//          activeTopics.toSet,
+//          activeDataTypes.toSet
+//        )
+//      })
+    }
 
     appStarted.put(true)
   }
