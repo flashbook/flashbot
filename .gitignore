@@ -9,6 +9,8 @@ target
 flashbot_data
 flashbot_logs
 
+ops
+
 # dependencies
 webui/node_modules
 

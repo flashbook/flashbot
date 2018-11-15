@@ -7,7 +7,6 @@ GET        /                             io.flashbook.flashbot.controllers.Appli
 GET        /bots/:bot                    io.flashbook.flashbot.controllers.Application.bot(bot)
 
 GET		   /backtest/:strategy/ws   	 io.flashbook.flashbot.controllers.Application.backtestWS(strategy, from="7d", to="now", balances = "{}")
-
 GET		   /backtest/:strategy			 io.flashbook.flashbot.controllers.Application.backtest(strategy)
 
 # Prefix must match `play.assets.urlPrefix`

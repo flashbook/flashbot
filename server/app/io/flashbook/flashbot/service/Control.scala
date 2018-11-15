@@ -26,9 +26,9 @@ object Control {
   appStarted.put(false)
 
   val engine = new SyncVar[ActorRef]
-  val system = new SyncVar[ActorSystem]
+//  val system = new SyncVar[ActorSystem]
 
-  def start()(implicit config: Config, app: Application): Unit = {
+  def start()(implicit config: Config, app: Application, system: ActorSystem): Unit = {
     val dataPath = config.getString("flashbot.dataPath")
 
     // Warn if the app is already started.
@@ -36,11 +36,11 @@ object Control {
       println("Warning: App already started")
     } else println("Starting App")
 
-    val systemConfig = config
-      .withValue("akka.persistence.journal.leveldb.dir",
-        ConfigValueFactory.fromAnyRef(s"$dataPath/journal"))
-      .withValue("akka.persistence.snapshot-store.local.dir",
-        ConfigValueFactory.fromAnyRef(s"$dataPath/snapshot-store"))
+//    val systemConfig = config
+//      .withValue("akka.persistence.journal.leveldb.dir",
+//        ConfigValueFactory.fromAnyRef(s"$dataPath/journal"))
+//      .withValue("akka.persistence.snapshot-store.local.dir",
+//        ConfigValueFactory.fromAnyRef(s"$dataPath/snapshot-store"))
 
     val baseConfigJson: Json = parse(Source
       .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
@@ -66,17 +66,13 @@ object Control {
       .getOrElse(flashbotConfig.data_sources)
 
 
-    // Create our own actor system.
-    if (!system.isSet) {
-      system.put(ActorSystem("flashbot", systemConfig))
-    }
-    implicit val sys = system.get
+//      system.put(ActorSystem("flashbot", systemConfig))
     implicit val mat: Materializer = buildMaterializer
-    implicit val ec: ExecutionContext = sys.dispatcher
+    implicit val ec: ExecutionContext = system.dispatcher
 
-    // Start the TradingEngine
+    // Start a TradingEngine
     if (!engine.isSet) {
-      engine.put(sys.actorOf(
+      engine.put(system.actorOf(
         Props(new TradingEngine(
           List(dataPath, "sources").mkString("/"),
           flashbotConfig.strategies,
@@ -91,9 +87,9 @@ object Control {
       println("Warning: Flashbot engine already started.")
     }
 
-    // Start the data ingest
+    // Start a DataServer
     finalDataSources.keySet.foreach(srcName => {
-      val actor = sys.actorOf(Props[IngestService], s"ingest:$srcName")
+      val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
       actor ! (
         srcName,
         List(dataPath, "sources").mkString("/"),
@@ -111,9 +107,9 @@ object Control {
       println("Warning: App already stopped")
     }
 
-    if (system.isSet) {
-      system.take().terminate()
-    }
+//    if (system.isSet) {
+//      system.take().terminate()
+//    }
 
     appStarted.put(false)
   }
