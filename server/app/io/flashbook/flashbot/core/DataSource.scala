@@ -3,6 +3,7 @@ package io.flashbook.flashbot.core
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import io.circe.Json
+import io.circe.generic.auto._
 import io.flashbook.flashbot.util.time.parseDuration
 
 import scala.concurrent.duration.FiniteDuration

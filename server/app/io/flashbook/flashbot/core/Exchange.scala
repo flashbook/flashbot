@@ -3,11 +3,12 @@ package io.flashbook.flashbot.core
 import java.util.UUID.randomUUID
 
 import io.circe.Json
+import io.circe.generic.auto._
 import io.flashbook.flashbot.core.Order.{Fill, Side}
 import io.flashbook.flashbot.engine.TradingSession
 
 object Exchange {
-  final case class ExchangeConfig(`class`: String, params: Json)
+  case class ExchangeConfig(`class`: String, params: Json)
 }
 
 abstract class Exchange {

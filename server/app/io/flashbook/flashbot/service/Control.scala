@@ -9,6 +9,8 @@ import play.api.inject.ApplicationLifecycle
 import io.circe.Json
 import io.circe.parser.parse
 import io.circe.generic.auto._
+import io.circe.literal._
+import io.flashbook.flashbot.service._
 import io.flashbook.flashbot.engine.TradingEngine.StartEngine
 import io.flashbook.flashbot.engine.{DataServer, IngestService, TradingEngine, TradingSession}
 import io.flashbook.flashbot.util.stream.buildMaterializer
@@ -46,11 +48,10 @@ object Control {
       .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
       .getLines.mkString).right.get
 
-
-    val flashbotConfig = baseConfigJson.as[ConfigFile].right.get
-//    val flashbotConfig = baseConfigJson
-//      .deepMerge(parse(Source.fromFile("config.json", "utf-8").getLines.mkString).right.get)
-//      .as[ConfigFile].right.get
+//    Source.fromFile("config.json", "utf-8").getLines.mkString
+    val flashbotConfig = baseConfigJson
+      .deepMerge(json"""{"exchanges": {}, "bots": {}}""")
+      .as[ConfigFile].right.get
 
     def getStringListOpt(path: String): Option[Seq[String]] =
       if (config.getIsNull(path)) None else Some(config.getStringList(path).asScala)
