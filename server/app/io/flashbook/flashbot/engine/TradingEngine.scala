@@ -34,7 +34,9 @@ class TradingEngine(dataDir: String,
                     dataSourceConfigs: Map[String, DataSourceConfig],
                     exchangeConfigs: Map[String, ExchangeConfig],
                     defaultBots: Map[String, BotConfig])
-  extends PersistentActor with ActorLogging with ClusterMemberManager {
+  extends PersistentActor with ActorLogging {
+
+  val cluster = Cluster(context.system)
 
   import TradingEngine._
   import scala.collection.immutable.Seq
@@ -43,21 +45,10 @@ class TradingEngine(dataDir: String,
   implicit val mat: ActorMaterializer = buildMaterializer
   implicit val ec: ExecutionContext = system.dispatcher
 
-  val cluster = Cluster(system)
-
-  override def preStart() = {
-    cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
-      classOf[MemberEvent], classOf[UnreachableMember])
-  }
-
-  override def postStop() = cluster.unsubscribe(self)
-
   val snapshotInterval = 100000
   var state = EngineState(Map.empty)
 
   override def persistenceId: String = "trading-engine"
-
-  private val engine = self
 
   /**
     * Turns an incoming command into a sequence of [[Event]] objects that affect the state in
@@ -292,7 +283,7 @@ class TradingEngine(dataDir: String,
             throw err
         }
 
-      case _ => sender ! EngineError("Unsupported query type")
+      case q => sender ! EngineError(s"Unsupported query $q")
     }
 
     case cmd: Command =>
@@ -402,6 +393,7 @@ object TradingEngine {
   case class BotReportsQuery() extends Query
   case class BotSessionsQuery(botId: String) extends Query
   case class StrategiesQuery() extends Query
+  case class StrategyInfoQuery(name: String) extends Query
 
   sealed trait Response
   case object Pong extends Response {
@@ -413,6 +405,7 @@ object TradingEngine {
   case class BotSessionsResponse(id: String, sessions: Seq[TradingSessionState]) extends Response
   case class StrategyResponse(name: String) extends Response
   case class StrategiesResponse(strats: Seq[StrategyResponse]) extends Response
+  case class StrategyInfoResponse(name: String) extends Query
 
   final case class EngineError(message: String, cause: Option[Throwable] = None)
     extends Exception(message, cause.orNull) with Response

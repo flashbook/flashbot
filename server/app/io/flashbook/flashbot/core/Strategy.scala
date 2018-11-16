@@ -1,5 +1,7 @@
 package io.flashbook.flashbot.core
 
+import java.util.concurrent.Future
+
 import io.circe._
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.engine.TradingSession
@@ -16,14 +18,18 @@ import io.flashbook.flashbot.util.parseProductId
   */
 abstract class Strategy {
 
-  type Props
-
   val DEFAULT = "default"
 
   /**
     * Human readable title for display purposes.
     */
   def title: String
+
+  /**
+    * Generate a self-describing StrategyInfo instance given the FlashbotScope in which this
+    * strategy will run.
+    */
+  def info(loader: FlashbotScope): Future[StrategyInfo]
 
   /**
     * During initialization, strategies declare what data sources they need by name, all of which
@@ -123,7 +129,4 @@ abstract class Strategy {
     */
   var buffer: Option[VarBuffer] = None
   implicit def internalStrategyState = buffer.get
-}
-
-object Strategy {
 }

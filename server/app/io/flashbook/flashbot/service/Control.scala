@@ -1,7 +1,10 @@
 package io.flashbook.flashbot.service
 
-import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
+import akka.cluster.Cluster
 import akka.stream.Materializer
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import javax.inject.{Inject, Singleton}
 import play.api.Application
@@ -16,6 +19,7 @@ import io.flashbook.flashbot.engine.{DataServer, IngestService, TradingEngine, T
 import io.flashbook.flashbot.util.stream.buildMaterializer
 
 import scala.concurrent.{ExecutionContext, Future, SyncVar}
+import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.io.Source
 
@@ -31,6 +35,7 @@ object Control {
   val dataServer = new SyncVar[ActorRef]
 
   def start()(implicit config: Config, app: Application, system: ActorSystem): Unit = {
+
     val dataPath = config.getString("flashbot.dataPath")
 
     // Warn if the app is already started.
@@ -69,7 +74,6 @@ object Control {
       .getOrElse(flashbotConfig.data_sources)
 
 
-//      system.put(ActorSystem("flashbot", systemConfig))
     implicit val mat: Materializer = buildMaterializer
     implicit val ec: ExecutionContext = system.dispatcher
 
@@ -116,16 +120,33 @@ object Control {
   }
 
   def stop(): Unit = {
+
+    println("ENDING")
+
     if (!appStarted.take()) {
       println("Warning: App already stopped")
     }
 
-//    if (system.isSet) {
-//      system.take().terminate()
-//    }
+    if (engine.isSet) {
+      engine.take() ! PoisonPill
+    }
+
+    if (dataServer.isSet) {
+      dataServer.take() ! PoisonPill
+    }
 
     appStarted.put(false)
   }
+
+  implicit val timeout: Timeout = Timeout(5 seconds)
+  def request[T <: TradingEngine.Response](query: TradingEngine.Query)
+             (implicit ec: ExecutionContext): Future[T] =
+    (engine.get ? query).flatMap {
+      case err: TradingEngine.EngineError => Future.failed(err)
+      case err: Throwable => Future.failed(err)
+      case rsp: T => Future.successful(rsp)
+      case rsp => Future.failed(new RuntimeException(s"Request type error for query $query"))
+    }
 }
 
 /**

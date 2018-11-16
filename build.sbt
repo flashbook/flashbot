@@ -9,6 +9,7 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
   pipelineStages := Seq(digest, gzip),
   // triggers scalaJSPipeline when using compile or continuous compilation
   compile in Compile := ((compile in Compile) dependsOn scalaJSPipeline).value,
+  resolvers += "jitpack" at "https://jitpack.io",
   libraryDependencies ++= ((
     serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLServerDeps ++
     dataStores ++ timeSeriesDeps ++ testDeps ++ statsDeps
@@ -16,6 +17,7 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
     "com.vmunier" %% "scalajs-scripts" % "1.1.2",
     "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
     "com.lihaoyi" %% "fansi" % "0.2.5",
+    "com.github.Opetushallitus" % "scala-schema" % "2.23.0_2.12",
     guice, ws,
     specs2 % Test
   )),

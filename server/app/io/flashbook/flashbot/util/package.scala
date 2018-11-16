@@ -3,6 +3,9 @@ package io.flashbook.flashbot
 import scala.util.matching.Regex
 import io.flashbook.flashbot.core.Pair
 
+import scala.concurrent.Future
+import scala.util.{Failure, Success, Try}
+
 package object util {
 
   def parseProductId(str: String): Pair = {
@@ -24,6 +27,18 @@ package object util {
     case longVal(v: String) => v
     case rmDot(v: String) => v
     case doubleVal(a: String, b: String) => a + b
+  }
+
+  implicit class OptionOps[A](opt: Option[A]) {
+    def toTry(msg: String): Try[A] = {
+      opt
+        .map(Success(_))
+        .getOrElse(Failure(new NoSuchElementException(msg)))
+    }
+  }
+
+  implicit class FutureOps[A](opt: Option[A]) {
+    def toFut(msg: String): Future[A] = Future.fromTry(opt.toTry(msg))
   }
 
 }
