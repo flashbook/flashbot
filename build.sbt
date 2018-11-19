@@ -54,7 +54,8 @@ lazy val client = (project in file("client")).settings(commonSettings).settings(
     "style-loader" -> "0.19.0",
     "css-loader" -> "0.28.7",
     "html-webpack-plugin" -> "2.30.1",
-    "copy-webpack-plugin" -> "4.2.0"
+    "copy-webpack-plugin" -> "4.2.0",
+    "react-jsonschema-form" -> "1.0.6"
   )
 ).enablePlugins(ScalaJSPlugin, ScalaJSBundlerPlugin, ScalaJSWeb).
   dependsOn(sharedJs)

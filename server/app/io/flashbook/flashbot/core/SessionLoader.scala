@@ -4,6 +4,6 @@ import scala.concurrent.Future
 
 trait DataSourceIndex
 
-class FlashbotScope {
+class SessionLoader {
   def allDataSources: Future[Map[String, DataSourceIndex]] = ???
 }

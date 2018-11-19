@@ -70,11 +70,11 @@ case class Report(strategy: String,
 
     case e: PriceEvent =>
       genTimeSeriesDelta[PriceEvent](
-        List("price", e.exchange, e.product.toString).mkString("."), e, _.price) :: Nil
+        List("price", e.exchange, e.instrument.toString).mkString("."), e, _.price) :: Nil
 
-    case e: BalanceEvent =>
-      genTimeSeriesDelta[BalanceEvent](
-        List("balance", e.account.exchange, e.account.currency).mkString("."), e, _.balance) :: Nil
+    case e: PositionEvent =>
+      genTimeSeriesDelta[PositionEvent](
+        List("balance", e.account.exchange, e.account.security).mkString("."), e, _.balance) :: Nil
 
     case e: TimeSeriesEvent =>
       genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value) :: Nil

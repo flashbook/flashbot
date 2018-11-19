@@ -8,20 +8,19 @@ import io.flashbook.flashbot.report.{Report, ReportDelta, ReportEvent}
 
 
 trait TradingSession {
-  import TradingSession._
-
   def id: String
-  def balances: Map[Account, Double]
-  def handleEvents(events: Event*): Unit
-  def actionQueues: Map[String, ActionQueue]
+  def send(events: Any*): Unit
+  def getBalances: Map[Account, Double]
+  def getActionQueues: Map[String, ActionQueue]
 }
 
 object TradingSession {
+
   trait Event
   case class LogMessage(message: String) extends Event
   case class OrderTarget(exchangeName: String,
                          targetId: TargetId,
-                         size: Size,
+                         size: FixedSize,
                          price: Option[Double],
                          postOnly: Boolean) extends Event
   case class SetHedge(coin: String, position: Long) extends Event

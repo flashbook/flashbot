@@ -43,14 +43,14 @@ package object core {
   case object Base extends PairRole
   case object Quote extends PairRole
 
-  case class Pair(base: String, quote: String) {
-    override def toString: String = s"${base}_$quote"
-    def toSeq: Seq[String] = List(base, quote)
-  }
+//  case class Pair(base: String, quote: String) {
+//    override def toString: String = s"${base}_$quote"
+//    def toSeq: Seq[String] = List(base, quote)
+//  }
 
-  object Pair {
-    def apply(str: String): Pair = parseProductId(str)
-  }
+//  object Pair {
+//    def apply(str: String): Pair = parseProductId(str)
+//  }
 
   case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped
 
@@ -125,11 +125,11 @@ package object core {
   case object Bid extends QuoteSide
   case object Ask extends QuoteSide
 
-  case class Account(exchange: String, currency: String)
+  case class Account(exchange: String, security: String)
 
-  case class Market(exchange: String, product: Pair)
+  case class Market(exchange: String, instrument: Instrument)
 
-  case class Tick(exchange: String)
+  case class Tick(events: Seq[Any] = Seq.empty, exchange: Option[String] = None)
 
   sealed trait StrategyEvent
   case class StrategyOrderEvent(targetId: TargetId, event: OrderEvent) extends StrategyEvent
@@ -157,13 +157,9 @@ package object core {
     override def funds: Option[Double] = Some(size.abs)
   }
 
-  case class Ratio(ratio: Double, scope: Scope) extends Size
-
-
-  sealed trait Scope
-  case object Portfolio extends Scope
-  case object PairScope extends Scope
-  case class Basket(coins: Set[String]) extends Scope
+  case class Ratio(ratio: Double,
+                   extraBaseAssets: Set[String] = Set.empty,
+                   basePegs: Boolean = false) extends Size
 
   final case class TargetId(pair: Pair, key: String)
 }

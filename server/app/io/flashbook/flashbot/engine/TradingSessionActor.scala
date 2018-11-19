@@ -25,7 +25,8 @@ import io.flashbook.flashbot.report._
 
 import scala.collection.immutable.Queue
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.{ExecutionContext, Future, SyncVar}
 import scala.util.{Failure, Success}
 
 class TradingSessionActor(dataDir: String,
@@ -43,14 +44,28 @@ class TradingSessionActor(dataDir: String,
   implicit val system: ActorSystem = context.system
   implicit val mat: ActorMaterializer = buildMaterializer
 
-  val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
-  var tickRefOpt: Option[ActorRef] = None
+  // Setup a thread safe reference to an event buffer which allows the session to process
+  // events synchronously when possible.
+  val eventBuffer: SyncVar[mutable.Buffer[Any]] = new SyncVar[mutable.Buffer[Any]]
 
-  def setup(): Either[EngineError, SessionSetup] = {
+  val dataSourceClassNames: Map[String, String] = dataSourceConfigs.mapValues(_.`class`)
+
+  // Allows the session to respond to events other than incoming market data. Exchange instances
+  // can send ticks to let the session know that they have events ready to be collected. Strategies
+  // can also send events to the session. These are stored in tick.event.
+  var tickRefOpt: Option[ActorRef] = None
+  def emitTick(tick: Tick) = {
+    tickRefOpt match {
+      case Some(ref) => ref ! tick
+      case None => log.warning(s"Ignoring tick $tick because the tick ref actor is not loaded.")
+    }
+  }
+
+  def setup(): Future[SessionSetup] = {
 
     // Check that we have a config for the requested strategy.
     if (!strategyClassNames.isDefinedAt(strategyKey)) {
-      return Left(EngineError(s"Unknown strategy: $strategyKey"))
+      return Future.failed(EngineError(s"Unknown strategy: $strategyKey"))
     }
 
     // Load and validate the strategy class
@@ -185,9 +200,7 @@ class TradingSessionActor(dataDir: String,
             if (mode == Live) instance
             else new Simulator(instance)
           finalTickInstance.setTickFn(() => {
-            tickRefOpt.foreach { ref =>
-              ref ! Tick(srcKey)
-            }
+            emitTick(Tick(Some(srcKey), None))
           })
           exchanges = exchanges + (srcKey -> finalTickInstance)
         } catch {
@@ -220,35 +233,33 @@ class TradingSessionActor(dataDir: String,
   def runSession(sessionSetup: SessionSetup): String = sessionSetup match {
     case SessionSetup(markets, dataSourceAddresses, dataSources, exchanges,
         strategy, sessionId, sessionMicros) =>
-      var currentStrategySeqNr: Option[Long] = None
 
       /**
-        * The trading session that we fold market data over. We pass the running session instance
-        * to the strategy every time we call `handleData`.
+        * The trading session that we fold market data over.
         */
-      case class Session(seqNr: Long = 0,
-                         balances: Map[Account, Double] = initialBalances,
-                         prices: Map[Market, Double] = Map.empty,
-                         orderManagers: Map[String, OrderManager] =
-                            markets.mapValues(_ => OrderManager()),
-                         // Create action queue for every exchange
-                         actionQueues: Map[String, ActionQueue] = markets
-                           .mapValues(_ => ActionQueue()),
-                         emittedReportEvents: Seq[ReportEvent] = Seq.empty,
-                         hedges: mutable.Map[String, Double] = mutable.Map.empty)
+      class Session(protected[engine] var portfolio: Portfolio = initialBalances,
+                    protected[engine] var prices: PriceMap = Map.empty[Market, Double],
+                    protected[engine] var orderManagers: Map[String, OrderManager] =
+                        markets.mapValues(_ => OrderManager()),
+                     // Create action queue for every exchange
+                    protected[engine] var actionQueues: Map[String, ActionQueue] =
+                        markets.mapValues(_ => ActionQueue()),
+                    protected[engine] var emittedReportEvents: Seq[ReportEvent] = Seq.empty,
+                    protected[engine] var hedges: mutable.Map[String, Double] = mutable.Map.empty)
         extends TradingSession {
 
         override val id: String = sessionId
 
-        override def handleEvents(events: TradingSession.Event*): Unit =
-          events.foreach(handleEvent)
+        /**
+          * Events sent to the session are either emitted as a Tick, or added to the event buffer
+          * if we can, so that the strategy can process events synchronously when possible.
+          */
+        protected[engine] var sendFn: Seq[Any] => Unit = _ => {
+          throw new RuntimeException("sendFn not defined yet.")
+        }
 
-        private var targets = Queue.empty[OrderTarget]
-        private var reportEvents = Queue.empty[ReportEvent]
-
-        def handleEvent(event: TradingSession.Event): Unit = {
-          currentStrategySeqNr match {
-            case Some(seq) if seq == seqNr =>
+        def send(events: Any*): Unit = {
+          sendFn(events)
               event match {
                 case target: OrderTarget =>
                   targets = targets.enqueue(target)
@@ -263,31 +274,13 @@ class TradingSessionActor(dataDir: String,
                   })
 
                 case msg: LogMessage =>
-                  // TODO: This should save to a time log, not log to stdout...
+                  // TODO: This should save to a db, not log to stdout...
                   log.info(msg.message)
 
                 case h: SetHedge =>
                   hedges += (h.coin -> h.position)
               }
-
-            case _ =>
-              throw new RuntimeException("Asynchronous strategies are not supported. " +
-                "`handleEvent` must be called in the same call stack that handleData " +
-                "was called.")
           }
-        }
-
-        def collectTargets: Seq[OrderTarget] = {
-          val _targets = targets
-          targets = Queue.empty
-          _targets
-        }
-
-        def collectReportEvents: Seq[ReportEvent] = {
-          val _events = reportEvents
-          reportEvents = Queue.empty
-          _events
-        }
       }
 
       val iteratorExecutor: ExecutionContext =
@@ -339,8 +332,28 @@ class TradingSessionActor(dataDir: String,
           case md: MarketData => Left(md)
           case tick: Tick => Right(tick)
         }
-        .scan(Session()) { case (session @ Session(
-            seqNr, balances, prices, oms, actions, _, hedges), dataOrTick) =>
+        .scan(new Session()) { case (session, dataOrTick) =>
+
+          // First, setup the event buffer so that we can handle synchronous events.
+          val thisEventBuffer: mutable.Buffer[Any] = new ArrayBuffer[Any]()
+          eventBuffer.put(thisEventBuffer)
+
+          // Set the session `sendFn` function. Close over `thisEventBuffer` and check that it
+          // matches the one in the syncvar. Only then can we append to it, otherwise, emit it
+          // as an async tick.
+          session.sendFn = (events: Seq[Any]) => {
+            if (eventBuffer.isSet) {
+              val buf = eventBuffer.get(5L)
+              // Check the syncvar for reference equality with our buffer.
+              if (buf.isDefined && (buf.get eq thisEventBuffer)) {
+                thisEventBuffer ++= events
+              } else {
+                emitTick(Tick(events))
+              }
+            } else {
+              emitTick(Tick(events))
+            }
+          }
 
           implicit val ctx: TradingSession = session
 
@@ -350,46 +363,47 @@ class TradingSessionActor(dataDir: String,
             case Left(md: MarketData) => (None, Some(md))
           }
 
-          val ex = data.map(_.source).getOrElse(tick.get.exchange)
+          // An optional string that represents the exchange tied to this scan iteration.
+          val ex: Option[String] = data
+            .map(_.source)
+            .orElse(tick.flatMap(_.exchange))
+            .filter(exchanges.isDefinedAt)
+          val exchange: Option[Exchange] = ex.map(exchanges(_))
 
-          var newPrices = prices
-          var newOMs = oms
-          var newActions = actions
+//          var newOMs = oms
+//          var newActions = actions
 
           // If this data has price info attached, emit that price info.
           data match {
             case Some(pd: Priced) => // I love pattern matching on types.
-              try {
-                newPrices += (Market(pd.exchange, pd.product) -> pd.price)
-              } catch {
-                case err: Throwable =>
-//                    log.warning(s"Error retreiving price for ${pd.product}")
-              }
+              session.prices += (Market(pd.exchange, pd.product) -> pd.price)
               // TODO: Emit prices here
 //                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
             case _ =>
           }
 
           // Update the relevant exchange with the market data to collect fills and user data
-          // TODO: This doesn't support non-exchange data sources yet
-          val (fills, userData) = exchanges(ex).collect(session, data)
-          userData.foldLeft((newOMs, newActions)) {
+          val (fills, userData) = exchange
+            .map(_.collect(session, data))
+            .getOrElse((Seq.empty, Seq.empty))
+
+          userData.foldLeft((session.orderManagers, session.actionQueues)) {
             /**
               * Either market or limit order received by the exchange. Associate the client id
               * with the exchange id. Do not close any actions yet. Wait until the order is
               * open, in the case of limit order, or done if it's a market order.
               */
             case ((os, as), o @ OrderReceived(id, _, clientId, _)) =>
-              strategy.handleEvent(StrategyOrderEvent(os(ex).ids.clientToTarget(clientId.get), o))
-              (os.updated(ex, os(ex).receivedOrder(clientId.get, id)), as)
+              strategy.handleEvent(StrategyOrderEvent(os(ex.get).ids.clientToTarget(clientId.get), o))
+              (os.updated(ex.get, os(ex.get).receivedOrder(clientId.get, id)), as)
 
             /**
               * Limit order is opened on the exchange. Close the action that submitted it.
               */
             case ((os, as), o @ OrderOpen(id, _, _, _, _)) =>
-              strategy.handleEvent(StrategyOrderEvent(os(ex).ids.actualToTarget(id), o))
-              (os.updated(ex, os(ex).openOrder(o)),
-                as.updated(ex, closeActionForOrderId(as(ex), os(ex).ids, id)))
+              strategy.handleEvent(StrategyOrderEvent(os(ex.get).ids.actualToTarget(id), o))
+              (os.updated(ex.get, os(ex.get).openOrder(o)),
+                as.updated(ex.get, closeActionForOrderId(as(ex.get), os(ex.get).ids, id)))
 
             /**
               * Either market or limit order is done. Could be due to a fill, or a cancel.
@@ -397,160 +411,131 @@ class TradingSessionActor(dataDir: String,
               * the action for the order id.
               */
             case ((os, as), o @ OrderDone(id, _, _, _, _, _)) =>
-              strategy.handleEvent(StrategyOrderEvent(os(ex).ids.actualToTarget(id), o))
-              (os.updated(ex, os(ex).orderComplete(id)),
-                as.updated(ex, closeActionForOrderId(as(ex), os(ex).ids, id)))
+              strategy.handleEvent(StrategyOrderEvent(os(ex.get).ids.actualToTarget(id), o))
+              (os.updated(ex.get, os(ex.get).orderComplete(id)),
+                as.updated(ex.get, closeActionForOrderId(as(ex.get), os(ex.get).ids, id)))
 
           } match {
-            case (_newOMs, _newActions) =>
-              newOMs = _newOMs
-              newActions = _newActions
+            case (newOMs, newActions) =>
+              session.orderManagers = newOMs
+              session.actionQueues = newActions
           }
 
-          var newReportEvents = Queue.empty[ReportEvent]
-          def emitReportEvent(e: ReportEvent): Unit = {
-            newReportEvents = newReportEvents.enqueue(e)
-          }
+          def acc(currency: String) = Account(ex.get, currency)
+          session.portfolio = fills.foldLeft(session.portfolio) {
+            case (portfolio, fill) =>
+              // Find accounts
+              val securityAccount = acc(fill.instrument.security.get)
+              val settlementAccount = acc(fill.instrument.settledIn.get)
 
-          def acc(currency: String) = Account(ex, currency)
-          val newBalances = fills.foldLeft(balances) {
-            case (bs, Fill(_, tradeId, fee, pair@Pair(base, quote), price, size,
-                micros, liquidity, side)) =>
+              // Settle
+              val (newSecPos, newSettlePos) = fill.instrument.settle(fill,
+                portfolio.position(securityAccount).get,
+                portfolio.position(settlementAccount).get)
 
-              val ret = side match {
-                /**
-                  * If we just bought some BTC using USD, then the fee was already subtracted
-                  * from the amount of available funds when determining the size of BTC filled.
-                  * Simply add the filled size to the existing BTC balance for base. For quote,
-                  * it's a little more complicated. We need to reconstruct the original amount
-                  * of quote funds (total cost) that was used for the order.
-                  *
-                  * total_cost * (1 - fee) = size * price
-                  */
-                case Buy =>
-                  // Cost without accounting for fees. This is what we pay the maker.
-                  val rawCost = size * price
-
-                  // Total quote currency paid out to both maker and exchange
-                  val totalCost = rawCost / (1 - fee)
-
-                  bs + (
-                    acc(base) -> (bs.getOrElse(acc(base), 0.0) + size),
-                    acc(quote) -> (bs(acc(quote)) - totalCost)
-                  )
-
-                /**
-                  * If we just sold a certain amount of BTC for USD, then the fee is subtracted
-                  * from the USD that is to be credited to our account balance.
-                  */
-                case Sell => bs + (
-                  acc(base) -> (bs(acc(base)) - size),
-                  acc(quote) -> (bs.getOrElse(acc(quote), 0.0) + size * price * (1 - fee))
-                )
-              }
+              // Update portfolio
+              val newPortfolio = portfolio
+                .withPosition(securityAccount, newSecPos)
+                .withPosition(settlementAccount, newSettlePos)
 
               // Emit a trade event when we see a fill
-              emitReportEvent(TradeEvent(tradeId, ex, pair.toString, micros, price, size))
+              session.send(TradeEvent(
+                fill.tradeId, ex.get, fill.instrument.toString,
+                fill.micros, fill.price, fill.size))
 
-              // Also balance info
-              val rb = ret(acc(base))
-              val rq = ret(acc(quote))
-              val t = formatDate(new Date(micros / 1000))
+              // Also emit portfolio info
+              session.send(PositionEvent(securityAccount, newSecPos, fill.micros))
+              session.send(PositionEvent(settlementAccount, newSettlePos, fill.micros))
+              session.send(TimeSeriesEvent("equity_usd",
+                newPortfolio.equity("usd", session.prices), fill.micros))
 
-              emitReportEvent(BalanceEvent(acc(base), ret(acc(base)), micros))
-              emitReportEvent(BalanceEvent(acc(quote), ret(acc(quote)), micros))
-
-              ret
+              // Return updated portfolio
+              newPortfolio
           }
 
-          // Use a sequence number to enforce the rule that Session.handleEvents is only
-          // allowed to be called in the current call stack. Send market data to strategy,
-          // then lock the handleEvent method again.
-          val sessionInstance = session.copy(
-            prices = newPrices,
-            balances = newBalances
-          )
+          // Call handleData and catch user errors.
+//          data match {
+//            case Some(md) =>
+//              currentStrategySeqNr = Some(session.seqNr)
+//              try {
+//                strategy.handleData(md)(sessionInstance)
+//              } catch {
+//                case e: Throwable =>
+//                  e.printStackTrace()
+//              }
+//              currentStrategySeqNr = None
+//            case None =>
+//          }
 
-          data match {
-            case Some(md) =>
-              currentStrategySeqNr = Some(session.seqNr)
-              try {
-                strategy.handleData(md)(sessionInstance)
-              } catch {
-                case e: Throwable =>
-                  e.printStackTrace()
-              }
-              currentStrategySeqNr = None
-            case None =>
-          }
+          // Take our event buffer from the syncvar. This allows the next scan iteration to `put`
+          // theirs in. Otherwise, `put` will block. Append to the events we received from a tick.
+          val events = tick.map(_.events).getOrElse(Seq.empty) ++ eventBuffer.take()
 
-          // Collected report events and targets should be empty if `handleData` wasn't called.
-          newReportEvents ++= sessionInstance.collectReportEvents
+          // Process the events.
+          events foreach {
+            // Send report events to the events actor ref.
+            case SessionReportEvent(reportEvent) =>
+              sessionEventsRef ! reportEvent
 
-          // Send the order targets to the corresponding order manager.
-          sessionInstance.collectTargets.foreach { target =>
-            newOMs += (target.exchangeName ->
-              newOMs(target.exchangeName).submitTarget(target))
+            // Send order targets to their corresponding order manager.
+            case target: OrderTarget =>
+              session.orderManagers += (target.exchangeName ->
+                session.orderManagers(target.exchangeName).submitTarget(target))
           }
 
           // If necessary, expand the next target into actions and enqueue them for each
           // order manager.
-          newOMs.foreach {
+          session.orderManagers.foreach {
             case (exName, om) =>
               om.enqueueActions(
                 exchanges(exName),
-                newActions(exName),
-                newBalances.filter(_._1.exchange == exName)
-                  .map { case (acc, value) => (acc.currency, value) },
-                newPrices.filter(_._1.exchange == exName)
+                session.actionQueues(exName),
+                session.balances.filter(_._1.exchange == exName)
+                  .map { case (acc, value) => (acc.asset, value) },
+                session.prices.filter(_._1.exchange == exName)
                   .map { case (market, value) => (market.product, value) },
-                hedges.toMap
+                session.hedges.toMap
               ) match {
-                case (_om, _actions) =>
-                  newOMs += (exName -> _om)
-                  newActions += (exName -> _actions)
+                case (newOm, newActions) =>
+                  session.orderManagers += (exName -> newOm)
+                  session.actionQueues += (exName -> newActions)
               }
           }
 
           // Here is where we tell the exchanges to do stuff, like place or cancel orders.
-          newActions.foreach { case (exName, acs) =>
+          session.actionQueues.foreach { case (exName, acs) =>
             acs match {
               case ActionQueue(None, next +: rest) =>
-                newActions += (exName -> ActionQueue(Some(next), rest))
+                session.actionQueues += (exName -> ActionQueue(Some(next), rest))
                 next match {
                   case action @ PostMarketOrder(clientId, targetId, side, size, funds) =>
-                    newOMs += (exName -> newOMs(exName).initCreateOrder(targetId, clientId, action))
+                    session.orderManagers += (exName ->
+                      session.orderManagers(exName).initCreateOrder(targetId, clientId, action))
                     exchanges(exName).order(
                       MarketOrderRequest(clientId, side, targetId.pair, size, funds))
 
                   case action @ PostLimitOrder(clientId, targetId, side, size, price, postOnly) =>
-                    newOMs = newOMs.updated(exName, newOMs(exName).initCreateOrder(targetId, clientId, action))
+                    session.orderManagers += (exName ->
+                      session.orderManagers(exName).initCreateOrder(targetId, clientId, action))
                     exchanges(exName)
                       .order(LimitOrderRequest(clientId, side, targetId.pair, size, price, postOnly))
 
                   case CancelLimitOrder(targetId) =>
-                    newOMs = newOMs.updated(exName, newOMs(exName).initCancelOrder(targetId))
-                    exchanges(exName)
-                      .cancel(newOMs(exName).ids.actualIdForTargetId(targetId), targetId.pair)
+                    session.orderManagers += (exName ->
+                      session.orderManagers(exName).initCancelOrder(targetId))
+                    exchanges(exName).cancel(
+                      session.orderManagers(exName).ids.actualIdForTargetId(targetId), targetId.pair)
                 }
               case _ =>
             }
           }
 
-          sessionInstance.copy(
-            seqNr = seqNr + 1,
-            orderManagers = newOMs,
-            actionQueues = newActions,
-            emittedReportEvents = newReportEvents
-          )
+          session
         }
         .drop(1)
-        .toMat(Sink.foreach { s =>
-          s.emittedReportEvents.foreach(sessionEventsRef ! _)
-        })(Keep.both)
+        .toMat(Sink.foreach { s => })(Keep.both)
         .run
 
-      // Allows exchanges to send ticks, so that we can react instantly to exchange events.
       tickRefOpt = Some(tickRef)
 
       fut.onComplete {
@@ -568,12 +553,12 @@ class TradingSessionActor(dataDir: String,
 
   override def receive: Receive = {
     case "start" =>
-      setup() match {
-        case Left(err) =>
-          sender ! err
-        case Right(sessionSetup) =>
+      setup().onComplete {
+        case Success(sessionSetup) =>
           sender ! (sessionSetup.sessionId, sessionSetup.sessionMicros)
           runSession(sessionSetup)
+        case Failure(err) =>
+          sender ! err
       }
   }
 }

@@ -18,19 +18,20 @@ import scala.math.BigDecimal.RoundingMode.HALF_DOWN
   *                       this represents an in-flight orders. For limit orders, this
   *                       represents an in-flight OR resting limit order.
   * @param ids an ID manager for linking orders to target ids
+  * @param pegs the configured pegs used for calculating order sizes
   */
 case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
                         mountedTargets: Map[TargetId, Action] = Map.empty,
-                        ids: IdManager = IdManager()) {
+                        ids: IdManager = IdManager(),
+                        pegs: Pegs) {
 
   def submitTarget(target: OrderTarget): OrderManager =
     copy(targets = targets.enqueue(target))
 
   def enqueueActions(exchange: Exchange,
                      currentActions: ActionQueue,
-                     balances: Map[String, Double],
-                     prices: Map[Pair, Double],
-                     hedges: Map[String, Double]): (OrderManager, ActionQueue) = {
+                     portfolio: Portfolio,
+                     prices: PriceMap): (OrderManager, ActionQueue) = {
 
     def roundQuote(pair: Pair)(balance: Double): Double =
       BigDecimal(balance).setScale(exchange.quoteAssetPrecision(pair), HALF_DOWN).doubleValue()
@@ -41,7 +42,8 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
       * Shared order size calculation for both limit and market orders. Returns either a valid
       * non-zero order size or None.
       */
-    def calculateFixedOrderSize(size: Size, pair: Pair, isMarketOrder: Boolean): Option[FixedSize] = {
+    def calculateFixedOrderSize(exchangeName: String, size: Size, pair: Pair,
+                                isMarketOrder: Boolean): Option[FixedSize] = {
 
       val fixedSizeRaw: FixedSize = size match {
         /**
@@ -49,22 +51,32 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
           */
         case fs: FixedSize => fs
 
-        /**
-          * Then check if it was a ratio amount, and calculate the correct order size.
-          * We want to enforce scopes here as well, so that when we go +1 btc/usd and
-          * -1 on eth/usd, we are long and short the same value of usd. As much as the
-          * portfolio balances will allow.
-          */
-        case Ratio(ratio, scope) =>
+        case Ratio(ratio, extraBaseAssets, basePegs) =>
+          val baseAccount = Account(exchangeName, pair.base)
+          val quoteAccount = Account(exchangeName, pair.quote)
 
-          // Take all the coins in the scope, including the current base.
-          val scopeCoins = ((scope match {
-            case Portfolio => balances.keySet ++ hedges.keySet
-            case PairScope => Set.empty[String]
-            case Basket(coins) => coins
-          }) + pair.base) - pair.quote
+          // Determine the portfolio of accounts that hold our base assets.
+          val explicitBaseAssets = extraBaseAssets + pair.base
+          val peggedBaseAssets = pegs.of(explicitBaseAssets)
+          val baseAssets = portfolio.filter {
+            case (Account(_, asset), _) =>
+              (explicitBaseAssets ++ (if (basePegs) peggedBaseAssets else Set.empty))
+                .contains(asset)
+          }
 
-          val hedge = hedges.getOrElse[Double](pair.base, 0)
+          // First calculate our existing base position.
+          // This is simply the sum of all base asset balances.
+          val pos = baseAssets.balances.values.sum
+
+          // Then calculate our position bounds. That is, what will our position be if we buy the
+          // maximum amount, and if we sell the maximum amount available for this order.
+          val buymax = ???
+          val sellmin = ???
+
+          // Now we can use the ratio to determine the target position and generate the order.
+
+
+//          val hedge = hedges.getOrElse[Double](pair.base, 0)
 
           // Build the max notional position value for each coin, based on its hedge
           // Get the min of that collection. The notional value of the current coin
@@ -118,69 +130,52 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
 
             /**
               * Market order target.
-              * Calculate the fixed order size and emit a PostMarketOrder action.
               */
             case ot @ OrderTarget(ex, targetId, size, None, _) =>
-              calculateFixedOrderSize(size, targetId.pair, isMarketOrder = true) match {
-                case Some(fixedSize) =>
-                  List(PostMarketOrder(
-                    exchange.genOrderId,
-                    targetId,
-                    fixedSize.side,
-                    fixedSize.amount,
-                    fixedSize.funds
-                  ))
-
-                case None =>
-//                  println("WARNING: Dropping empty market order", ot)
-                  Nil
-              }
-
+              List(PostMarketOrder(
+                exchange.genOrderId,
+                targetId,
+                size.side,
+                size.amount,
+                size.funds
+              ))
 
             /**
               * Limit order target.
-              * Similarly to market orders, calculate the fixed order size and emit a
-              * PostMarketOrder action. Unlike market orders, this action needs to be
-              * idempotent. It also needs to clean up after any existing limit orders
-              * with the same target id.
+              *
+              * Emit a PostLimitOrder action. Unlike market orders, this action needs to be
+              * idempotent. It also needs to clean up after any existing limit orders with
+              * the same target id.
               */
             case ot @ OrderTarget(ex, targetId, size, Some(price), postOnly) =>
-              calculateFixedOrderSize(size, targetId.pair, isMarketOrder = false) match {
-                case Some(fixedSize) =>
+              val post = PostLimitOrder(
+                exchange.genOrderId,
+                targetId,
+                size.side,
+                size.amount.get,
+                price,
+                postOnly
+              )
 
-                  val post = PostLimitOrder(
-                    exchange.genOrderId,
-                    targetId,
-                    fixedSize.side,
-                    fixedSize.amount.get,
-                    price,
-                    postOnly
-                  )
+              val cancel = CancelLimitOrder(targetId)
 
-                  val cancel = CancelLimitOrder(targetId)
+              mountedTargets.get(targetId) match {
+                /**
+                  * Existing mounted target is identical to this one. Ignore for idempotency.
+                  */
+                case Some(action: PostLimitOrder)
+                  if action.price == price && action.size == size.amount.get => Nil
 
-                  mountedTargets.get(targetId) match {
-                    /**
-                      * Existing mounted target is identical to this one. Ignore for idempotency.
-                      */
-                    case Some(action: PostLimitOrder)
-                      if action.price == price && action.size == fixedSize.amount.get => Nil
+                /**
+                  * Existing mounted target is different than this target. Cancel the previous
+                  * order and create the new one.
+                  */
+                case Some(_: PostLimitOrder) => List(cancel, post)
 
-                    /**
-                      * Existing mounted target is different than this target. Cancel the previous
-                      * order and create the new one.
-                      */
-                    case Some(_: PostLimitOrder) => List(cancel, post)
-
-                    /**
-                      * No existing mounted target. Simply post the limit order.
-                      */
-                    case None => List(post)
-                  }
-
-                case None =>
-                  println("WARNING: Dropping empty limit order", ot)
-                  Nil
+                /**
+                  * No existing mounted target. Simply post the limit order.
+                  */
+                case None => List(post)
               }
           }
 
@@ -188,7 +183,7 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
           // This prevents the target queue from backing up.
           if (newTargetQueue.nonEmpty && actions.isEmpty) {
             copy(targets = newTargetQueue)
-              .enqueueActions(exchange, currentActions, balances, prices, hedges)
+              .enqueueActions(exchange, currentActions, portfolio, prices)
           } else {
             (copy(targets = newTargetQueue), currentActions.enqueue(actions))
           }

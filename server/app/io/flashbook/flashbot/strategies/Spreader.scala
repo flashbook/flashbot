@@ -7,15 +7,27 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.core.AggBook._
 import io.flashbook.flashbot.engine.TradingSession
 
+import fi.oph.scalaschema._
+import fi.oph.scalaschema.annotation._
+
+import scala.concurrent.Future
+
 class Spreader extends Strategy {
   def title = "Spreader"
 
-  case class Props(exchange: String, product: String)
+  @Description("Spreader properties")
+  case class Props(exchange: String,
+                   product: String)
+
   var params: Option[Props] = None
 
+  override def info(loader: SessionLoader) = {
+    Future.successful(StrategyInfo(SchemaFactory.default.createSchema[Props]))
+  }
+
   override def initialize(paramsJson: Json,
-                 dataSourceConfig: Map[String, DataSourceConfig],
-                 initialBalances: Map[Account, Double]) = {
+                          dataSourceConfig: Map[String, DataSourceConfig],
+                          initialBalances: Map[Account, Double]) = {
     params = Some(paramsJson.as[Props].right.get)
     s"${params.get.exchange}/${params.get.product}/book_10" :: Nil
   }
@@ -25,4 +37,5 @@ class Spreader extends Strategy {
       println(md.micros, md.data.spread)
 //      val spreadBook = "spread_book".get[AggBook]
   }
+
 }

@@ -7,6 +7,8 @@ import io.circe.generic.auto._
 import io.flashbook.flashbot.core.Order.{Fill, Side}
 import io.flashbook.flashbot.engine.TradingSession
 
+import scala.concurrent.Future
+
 object Exchange {
   case class ExchangeConfig(`class`: String, params: Json)
 }
@@ -52,6 +54,8 @@ abstract class Exchange {
   }
 
   def genOrderId: String = randomUUID.toString
+
+  def instruments: Future[Set[Instrument]]
 }
 
 sealed trait OrderRequest {

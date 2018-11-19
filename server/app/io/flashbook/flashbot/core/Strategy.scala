@@ -1,6 +1,5 @@
 package io.flashbook.flashbot.core
 
-import java.util.concurrent.Future
 
 import io.circe._
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
@@ -8,6 +7,8 @@ import io.flashbook.flashbot.engine.TradingSession
 import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent, SetHedge}
 import io.flashbook.flashbot.report.ReportEvent._
 import io.flashbook.flashbot.util.parseProductId
+
+import scala.concurrent.Future
 
 /**
   * Strategy is a container of logic that describes the behavior and data dependencies of a trading
@@ -29,7 +30,7 @@ abstract class Strategy {
     * Generate a self-describing StrategyInfo instance given the FlashbotScope in which this
     * strategy will run.
     */
-  def info(loader: FlashbotScope): Future[StrategyInfo]
+  def info(loader: SessionLoader): Future[StrategyInfo]
 
   /**
     * During initialization, strategies declare what data sources they need by name, all of which
@@ -38,9 +39,7 @@ abstract class Strategy {
     * the `handleData` method. Each stream should complete when there is no more data, which auto
     * shuts down the strategy when all data streams complete.
     */
-  def initialize(params: Json,
-                 dataSourceConfig: Map[String, DataSourceConfig],
-                 initialBalances: Map[Account, Double]): List[String]
+  def initialize(params: Json, portfolio: Portfolio, loader: SessionLoader): Future[List[String]]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.

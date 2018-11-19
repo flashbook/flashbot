@@ -34,8 +34,15 @@ object Order {
     }
   }
 
-  case class Fill(orderId: String, tradeId: Option[String], fee: Double, pair: Pair,
-                  price: Double, size: Double, micros: Long, liquidity: Liquidity, side: Side)
+  case class Fill(orderId: String,
+                  tradeId: Option[String],
+                  fee: Double,
+                  instrument: Instrument,
+                  price: Double,
+                  size: Double,
+                  micros: Long,
+                  liquidity: Liquidity,
+                  side: Side)
 }
 
 case class Order(id: String,

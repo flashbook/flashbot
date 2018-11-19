@@ -18,7 +18,7 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util.time.currentTimeMicros
 import io.flashbook.flashbot.util.stream.buildMaterializer
 import io.flashbook.flashbot.engine.TradingSession._
-import io.flashbook.flashbot.report.ReportEvent.BalanceEvent
+import io.flashbook.flashbot.report.ReportEvent.PositionEvent
 import io.flashbook.flashbot.report._
 
 import scala.concurrent.duration._
@@ -53,8 +53,12 @@ class TradingEngine(dataDir: String,
   /**
     * Turns an incoming command into a sequence of [[Event]] objects that affect the state in
     * some way and are then persisted, or into an [[EngineError]] to be returned to the sender.
+    * Note that while this is an asynchronous operation (returns a Future), the thread that
+    * handles engine commands will block on the Future in order to know what events to persist.
+    * This only applies to commands. Queries, which are read-only, bypass Akka persistence and
+    * hence are free to be fully-async.
     */
-  def processCommand(command: Command): Either[EngineError, Seq[Event]] = command match {
+  def processCommand(command: Command): Future[Seq[Event]] = command match {
 
     case StartEngine =>
 
@@ -76,19 +80,18 @@ class TradingEngine(dataDir: String,
           val (ref, fut) = Source
             .actorRef[ReportEvent](Int.MaxValue, OverflowStrategy.fail)
             .toMat(Sink.foreach { event =>
-//              println("Processing bot session event")
               self ! ProcessBotSessionEvent(name, event)
             })(Keep.both)
             .run
 
           fut onComplete {
             case Success(Done) =>
+              // TODO: What does it mean for a bot to complete? Can they complete? Or just crash.
               log.info(s"Bot $name completed successfully")
             case Failure(err) =>
               log.error(err, s"Bot $name failed")
           }
 
-          println("sending StartTradingSession")
           self ! StartTradingSession(
             Some(name),
             strategy,
@@ -99,9 +102,9 @@ class TradingEngine(dataDir: String,
             Report.empty(strategy, params)
           )
       }
-//      val foo: Set[String] = defaultBots.keys.toSet
-      val bots: Seq[String] = defaultBots.foldLeft(Seq.empty[String])((memo, item) => memo :+ item._1)
-      Right(EngineStarted(currentTimeMicros, bots) :: Nil)
+      val bots: Seq[String] =
+        defaultBots.foldLeft(Seq.empty[String])((memo, item) => memo :+ item._1)
+      Future.successful(EngineStarted(currentTimeMicros, bots) :: Nil)
 
     /**
       * A wrapper around a new SessionActor, which runs the actual strategy. This may be initiated
@@ -131,24 +134,12 @@ class TradingEngine(dataDir: String,
       )))
 
       // Start the session. We are only waiting for an initialization error, or a confirmation
-      // that the session was started, so we don't wait for too long. 1 second should do it.
-      try {
-        implicit val timeout: Timeout = Timeout(10 seconds)
-        try {
-          Await.result(sessionActor ? "start", timeout.duration) match {
-            case (sessionId: String, micros: Long) =>
-              Right(SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
-                mode, micros, initialBalances, initialReport) :: Nil)
-            case err: EngineError =>
-              Left(err)
-          }
-        } catch {
-          case err: Throwable =>
-            throw err
-        }
-      } catch {
-        case err: TimeoutException =>
-          Left(EngineError("Trading session initialization timeout", Some(err)))
+      // that the session was started, so we don't wait for too long.
+      implicit val timeout: Timeout = Timeout(10 seconds)
+      (sessionActor ? "start").map {
+        case (sessionId: String, micros: Long) =>
+          SessionStarted(sessionId, botIdOpt, strategyKey, strategyParams,
+            mode, micros, initialBalances, initialReport) :: Nil
       }
 
     /**
@@ -159,24 +150,27 @@ class TradingEngine(dataDir: String,
       */
     case ProcessBotSessionEvent(botId, event) =>
       if (!state.bots.isDefinedAt(botId)) {
-        println("ignoring")
-        return Right(Seq.empty)
+        log.warning(s"Ignoring session event for non-existent bot $botId. $event")
+        return Future.successful(Seq.empty)
       }
 
       val deltas = state.bots(botId).last.report.genDeltas(event)
         .map(ReportUpdated(botId, _))
         .toList
 
-      Right(event match {
-        case BalanceEvent(account, balance, micros) =>
+      Future.successful(event match {
+        case PositionEvent(account, balance, micros) =>
           BalancesUpdated(botId, account, balance) :: deltas
         case _ => deltas
       })
   }
 
   /**
-    * Persist every received command and occasionally save state snapshots so that the event log
-    * doesn't grow out of bounds.
+    * The TradingEngine message handler. This is how the outside world interacts with it. First
+    * we match on supported message types for PersistentActor management and reponding to queries.
+    * Finally we match on supported engine Commands which are processed *synchronously*. The events
+    * resulting from processing the command are persisted and can be used to replay the state of
+    * the actor after a crash/restart.
     */
   override def receiveCommand: Receive = {
     case err: EngineError =>
@@ -289,7 +283,6 @@ class TradingEngine(dataDir: String,
     case cmd: Command =>
       processCommand(cmd) match {
         case Left(err) =>
-          println("SENDING BACK ERROR", cmd, err, sender)
           sender ! err
         case Right(events) =>
           persistAll(events) { e =>
