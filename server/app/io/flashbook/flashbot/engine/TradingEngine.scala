@@ -17,8 +17,9 @@ import io.flashbook.flashbot.core.Exchange.ExchangeConfig
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util.time.currentTimeMicros
 import io.flashbook.flashbot.util.stream.buildMaterializer
+import io.flashbook.flashbot.util.json._
 import io.flashbook.flashbot.engine.TradingSession._
-import io.flashbook.flashbot.report.ReportEvent.PositionEvent
+import io.flashbook.flashbot.report.ReportEvent.{BalanceEvent, PositionEvent}
 import io.flashbook.flashbot.report._
 
 import scala.concurrent.duration._
@@ -64,17 +65,17 @@ class TradingEngine(dataDir: String,
 
       // Start the default bots
       defaultBots.foreach {
-        case (name, BotConfig(strategy, mode, params, initial_balances)) =>
+        case (name, BotConfig(strategy, mode, params, initial_assets, initial_positions)) =>
+
+          val initialAssets = initial_assets.map(kv => Account.parse(kv._1) -> kv._2)
+          val initialPositions = initial_positions.map(kv => Market.parse(kv._1) -> kv._2)
 
           // First of all, we look for any previous sessions for this bot. If one exists, then
-          // take the balance from the last session as the initial balances for this session.
-          // Otherwise, use the initial_balances from the bot config.
-          val initialSessionBalances =
-            state.bots.get(name).map(_.last.balances).getOrElse(initial_balances.map {
-              case (key, v) =>
-                val parts = key.split("/")
-                (Account(parts(0), parts(1)), v)
-            })
+          // take the portfolio from the last session as the initial portfolio for this session.
+          // Otherwise, use the initial_assets and initial_positions from the bot config.
+          val initialSessionPortfolio =
+            state.bots.get(name).map(_.last.portfolio)
+              .getOrElse(Portfolio(initialAssets, initialPositions))
 
           // Create an actor that processes ReportEvents from this session.
           val (ref, fut) = Source
@@ -98,7 +99,7 @@ class TradingEngine(dataDir: String,
             params,
             Mode(mode),
             ref,
-            initialSessionBalances,
+            initialSessionPortfolio,
             Report.empty(strategy, params)
           )
       }
@@ -159,8 +160,10 @@ class TradingEngine(dataDir: String,
         .toList
 
       Future.successful(event match {
-        case PositionEvent(account, balance, micros) =>
+        case BalanceEvent(account, balance, micros) =>
           BalancesUpdated(botId, account, balance) :: deltas
+        case PositionEvent(market, position, micros) =>
+          PositionUpdated(botId, market, position) :: deltas
         case _ => deltas
       })
   }
@@ -222,7 +225,7 @@ class TradingEngine(dataDir: String,
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
         * all session events into a stream that we fold over to create a report.
         */
-      case BacktestQuery(strategyName, params, timeRange, balancesStr, barSize, eventsOut) =>
+      case BacktestQuery(strategyName, params, timeRange, portfolioStr, barSize, eventsOut) =>
 
         try {
 
@@ -230,13 +233,7 @@ class TradingEngine(dataDir: String,
           val paramsJson = parse(params).right.get
           val report = Report.empty(strategyName, paramsJson, barSize)
 
-          // Parse initial balances JSON into an Account -> Double map
-          val balances: Map[Account, Double] = parse(balancesStr).right.get
-            .as[Map[String, Double]].right.get
-            .map { case (key, v) =>
-              val parts = key.split("/")
-              (Account(parts(0), parts(1)), v)
-            }
+          val portfolio = parseJson[Portfolio](portfolioStr).right.get
 
           // Fold the empty report over the ReportEvents emitted from the session.
           val (ref: ActorRef, fut: Future[Report]) =
@@ -263,11 +260,11 @@ class TradingEngine(dataDir: String,
 
           // Start the trading session
           processCommand(StartTradingSession(None, strategyName, paramsJson,
-              Backtest(timeRange), ref, balances, report)) match {
-            case Left(err: EngineError) =>
-              eventsOut.foreach(_ ! err)
-            case Right(events: Seq[Event]) =>
+              Backtest(timeRange), ref, portfolio, report)) onComplete {
+            case Success(events: Seq[Event]) =>
               events.foreach(println)
+            case Failure(err) =>
+              eventsOut.foreach(_ ! err)
           }
 
           fut.map(ReportResponse) pipeTo sender
@@ -281,16 +278,18 @@ class TradingEngine(dataDir: String,
     }
 
     case cmd: Command =>
-      processCommand(cmd) match {
-        case Left(err) =>
-          sender ! err
-        case Right(events) =>
+      // Blocking!
+      val result = Await.ready(processCommand(cmd), 10 seconds).value.get
+      result match {
+        case Success(events) =>
           persistAll(events) { e =>
             state = state.update(e)
             if (lastSequenceNr % snapshotInterval == 0) {
               saveSnapshot(state)
             }
           }
+        case Failure(err) =>
+          sender ! err
       }
   }
 
@@ -322,10 +321,10 @@ object TradingEngine {
         )
 
       case SessionStarted(id, Some(botId), strategyKey, strategyParams, mode,
-          micros, balances, report) =>
+          micros, portfolio, report) =>
         copy(bots = bots + (botId -> (
           bots.getOrElse[Seq[TradingSessionState]](botId, Seq.empty) :+
-            TradingSessionState(id, strategyKey, strategyParams, mode, micros, balances, report))))
+            TradingSessionState(id, strategyKey, strategyParams, mode, micros, portfolio, report))))
 
       case e: SessionUpdated => e match {
         case ReportUpdated(botId, delta) =>
@@ -336,7 +335,13 @@ object TradingEngine {
         case BalancesUpdated(botId, account, balance) =>
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
-            bot.last.copy(balances = bot.last.balances.updated(account, balance)))))
+            bot.last.copy(portfolio = bot.last.portfolio.withBalance(account, balance)))))
+
+        case PositionUpdated(botId, market, position) =>
+          val bot = bots(botId)
+          copy(bots = bots + (botId -> bot.updated(bot.length - 1,
+            bot.last.copy(portfolio = bot.last.portfolio.withPosition(market, position)))))
+
       }
     }
   }
@@ -347,7 +352,7 @@ object TradingEngine {
                                  strategyParams: Json,
                                  mode: Mode,
                                  sessionEvents: ActorRef,
-                                 initialBalances: Map[Account, Double],
+                                 initialPortfolio: Portfolio,
                                  report: Report) extends Command
 
   case object StartEngine extends Command
@@ -360,7 +365,7 @@ object TradingEngine {
                             strategyParams: Json,
                             mode: Mode,
                             micros: Long,
-                            balances: Map[Account, Double],
+                            portfolio: Portfolio,
                             report: Report) extends Event
   case class EngineStarted(micros: Long, withBots: Seq[String]) extends Event
 
@@ -372,13 +377,16 @@ object TradingEngine {
   case class BalancesUpdated(botId: String,
                              account: Account,
                              balance: Double) extends SessionUpdated
+  case class PositionUpdated(botId: String,
+                             market: Market,
+                             position: Position) extends SessionUpdated
 
   sealed trait Query
   case object Ping extends Query
   case class BacktestQuery(strategyName: String,
                            params: String,
                            timeRange: TimeRange,
-                           balances: String,
+                           portfolio: String,
                            barSize: Option[Duration],
                            eventsOut: Option[ActorRef] = None) extends Query
 

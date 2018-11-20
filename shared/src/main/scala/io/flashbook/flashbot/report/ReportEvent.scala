@@ -26,9 +26,12 @@ object ReportEvent {
                         instrument: Instrument,
                         price: Double,
                         micros: Long) extends ReportEvent with Timestamped
-  case class PositionEvent(account: Account,
+  case class PositionEvent(market: Market,
                            position: Position,
                            micros: Long) extends ReportEvent with Timestamped
+  case class BalanceEvent(account: Account,
+                          balance: Double,
+                          micros: Long) extends ReportEvent with Timestamped
 
   case class TimeSeriesEvent(key: String, value: Double, micros: Long)
     extends ReportEvent with Timestamped

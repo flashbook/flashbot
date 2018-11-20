@@ -9,8 +9,12 @@ class PriceMap(val prices: Map[Market, Double]) extends AnyVal {
 
 //  def filterBase(fn: String => Boolean): PriceMap = prices.filterKeys(p => fn(p.product.base))
 //  def filterQuote(fn: String => Boolean): PriceMap = prices.filterKeys(p => fn(p.product.quote))
+
+  def withPrice(market: Market, price: Double) = prices + (market -> price)
 }
 
 object PriceMap {
   implicit def priceMap(prices: Map[Market, Double]): PriceMap = new PriceMap(prices)
+
+  def empty: PriceMap = Map.empty[Market, Double]
 }

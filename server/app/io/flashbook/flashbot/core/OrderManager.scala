@@ -22,96 +22,93 @@ import scala.math.BigDecimal.RoundingMode.HALF_DOWN
   */
 case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
                         mountedTargets: Map[TargetId, Action] = Map.empty,
-                        ids: IdManager = IdManager(),
-                        pegs: Pegs) {
+                        ids: IdManager = IdManager()) {
 
   def submitTarget(target: OrderTarget): OrderManager =
     copy(targets = targets.enqueue(target))
 
   def enqueueActions(exchange: Exchange,
-                     currentActions: ActionQueue,
-                     portfolio: Portfolio,
-                     prices: PriceMap): (OrderManager, ActionQueue) = {
+                     currentActions: ActionQueue): (OrderManager, ActionQueue) = {
 
-    def roundQuote(pair: Pair)(balance: Double): Double =
-      BigDecimal(balance).setScale(exchange.quoteAssetPrecision(pair), HALF_DOWN).doubleValue()
-    def roundBase(pair: Pair)(balance: Double): Double =
-      BigDecimal(balance).setScale(exchange.baseAssetPrecision(pair), HALF_DOWN).doubleValue()
+//    def roundQuote(pair: Pair)(balance: Double): Double =
+//      BigDecimal(balance).setScale(exchange.quoteAssetPrecision(pair), HALF_DOWN).doubleValue()
+//    def roundBase(pair: Pair)(balance: Double): Double =
+//      BigDecimal(balance).setScale(exchange.baseAssetPrecision(pair), HALF_DOWN).doubleValue()
 
-    /**
-      * Shared order size calculation for both limit and market orders. Returns either a valid
-      * non-zero order size or None.
-      */
-    def calculateFixedOrderSize(exchangeName: String, size: Size, pair: Pair,
-                                isMarketOrder: Boolean): Option[FixedSize] = {
-
-      val fixedSizeRaw: FixedSize = size match {
-        /**
-          * Start with looking for fixed sizes, which will be used as order size directly.
-          */
-        case fs: FixedSize => fs
-
-        case Ratio(ratio, extraBaseAssets, basePegs) =>
-          val baseAccount = Account(exchangeName, pair.base)
-          val quoteAccount = Account(exchangeName, pair.quote)
-
-          // Determine the portfolio of accounts that hold our base assets.
-          val explicitBaseAssets = extraBaseAssets + pair.base
-          val peggedBaseAssets = pegs.of(explicitBaseAssets)
-          val baseAssets = portfolio.filter {
-            case (Account(_, asset), _) =>
-              (explicitBaseAssets ++ (if (basePegs) peggedBaseAssets else Set.empty))
-                .contains(asset)
-          }
-
-          // First calculate our existing base position.
-          // This is simply the sum of all base asset balances.
-          val pos = baseAssets.balances.values.sum
-
-          // Then calculate our position bounds. That is, what will our position be if we buy the
-          // maximum amount, and if we sell the maximum amount available for this order.
-          val buymax = ???
-          val sellmin = ???
-
-          // Now we can use the ratio to determine the target position and generate the order.
-
-
-//          val hedge = hedges.getOrElse[Double](pair.base, 0)
-
-          // Build the max notional position value for each coin, based on its hedge
-          // Get the min of that collection. The notional value of the current coin
-          // divided by this minimum is the factor by which the ratio needs to be
-          // scaled down by.
-          val min = scopeCoins
-            .map(coin => -hedges.getOrElse[Double](coin, 0) * prices(Pair(coin, pair.quote)))
-            .filter(_ > 0)
-            .min
-          val weight = (-hedge * prices(pair)) / min
-          val weightedRatio = ratio / weight
-
-          val targetBase = -hedge - (weightedRatio * hedge)
-          val currentBase = balances.getOrElse[Double](pair.base, 0)
-          val lotSize = exchange.lotSize(pair)
-          val baseDiff =
-            if (lotSize.isDefined) (((targetBase - currentBase) / lotSize.get).toLong *
-              BigDecimal(lotSize.get)).doubleValue
-            else targetBase - currentBase
-
-          if (baseDiff > 0 && exchange.useFundsForMarketBuys && isMarketOrder) {
-            Funds(baseDiff * prices(pair))
-          } else {
-            Amount(baseDiff)
-          }
-      }
-
-      val fixedSizeRounded = fixedSizeRaw match {
-        case Amount(s) => Amount(roundBase(pair)(s))
-        case Funds(s) => Funds(roundQuote(pair)(s))
-      }
-
-      if (fixedSizeRounded.size == 0) None
-      else Some(fixedSizeRounded)
-    }
+//    /**
+//      * Shared order size calculation for both limit and market orders. Returns either a valid
+//      * non-zero order size or None.
+//      */
+//    def calculateFixedOrderSize(exchangeName: String, size: Size, pair: Pair,
+//                                isMarketOrder: Boolean): Option[FixedSize] = {
+//
+//      val fixedSizeRaw: FixedSize = size match {
+//        /**
+//          * Start with looking for fixed sizes, which will be used as order size directly.
+//          */
+//        case fs: FixedSize => fs
+//
+//        case Ratio(ratio, extraBaseAssets, basePegs) =>
+//          val baseAccount = Account(exchangeName, pair.base)
+//          val quoteAccount = Account(exchangeName, pair.quote)
+//
+//          // Determine the portfolio of accounts that hold our base assets.
+//          val explicitBaseAssets = extraBaseAssets + pair.base
+//          val peggedBaseAssets = pegs.of(explicitBaseAssets)
+//          val baseAssets = portfolio.filter {
+//            case (Account(_, asset), _) =>
+//              (explicitBaseAssets ++ (if (basePegs) peggedBaseAssets else Set.empty))
+//                .contains(asset)
+//          }
+//
+//          // First calculate our existing base position.
+//          // This is simply the sum of all base asset balances.
+//          val pos = baseAssets.balances.values.sum
+//
+//          // Then calculate our position bounds. That is, what will our position be if we buy the
+//          // maximum amount, and if we sell the maximum amount available for this order.
+//          val buymax = ???
+//          val sellmin = ???
+//
+//          // Now we can use the ratio to determine the target position and generate the order.
+//
+//
+////          val hedge = hedges.getOrElse[Double](pair.base, 0)
+//
+//          // Build the max notional position value for each coin, based on its hedge
+//          // Get the min of that collection. The notional value of the current coin
+//          // divided by this minimum is the factor by which the ratio needs to be
+//          // scaled down by.
+//          val min = scopeCoins
+//            .map(coin => -hedges.getOrElse[Double](coin, 0) * prices(Pair(coin, pair.quote)))
+//            .filter(_ > 0)
+//            .min
+//          val weight = (-hedge * prices(pair)) / min
+//          val weightedRatio = ratio / weight
+//
+//          val targetBase = -hedge - (weightedRatio * hedge)
+//          val currentBase = balances.getOrElse[Double](pair.base, 0)
+//          val lotSize = exchange.lotSize(pair)
+//          val baseDiff =
+//            if (lotSize.isDefined) (((targetBase - currentBase) / lotSize.get).toLong *
+//              BigDecimal(lotSize.get)).doubleValue
+//            else targetBase - currentBase
+//
+//          if (baseDiff > 0 && exchange.useFundsForMarketBuys && isMarketOrder) {
+//            Funds(baseDiff * prices(pair))
+//          } else {
+//            Amount(baseDiff)
+//          }
+//      }
+//
+//      val fixedSizeRounded = fixedSizeRaw match {
+//        case Amount(s) => Amount(roundBase(pair)(s))
+//        case Funds(s) => Funds(roundQuote(pair)(s))
+//      }
+//
+//      if (fixedSizeRounded.size == 0) None
+//      else Some(fixedSizeRounded)
+//    }
 
     if (currentActions.nonEmpty) {
       // If the current actions queue still has actions to work with, then don't do anything.
@@ -182,8 +179,7 @@ case class OrderManager(targets: Queue[OrderTarget] = Queue.empty,
           // Detect if this target was a no-op, and if there are more targets, recurse.
           // This prevents the target queue from backing up.
           if (newTargetQueue.nonEmpty && actions.isEmpty) {
-            copy(targets = newTargetQueue)
-              .enqueueActions(exchange, currentActions, portfolio, prices)
+            copy(targets = newTargetQueue).enqueueActions(exchange, currentActions)
           } else {
             (copy(targets = newTargetQueue), currentActions.enqueue(actions))
           }

@@ -4,7 +4,7 @@ package io.flashbook.flashbot.core
 import io.circe._
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
 import io.flashbook.flashbot.engine.TradingSession
-import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent, SetHedge}
+import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent}
 import io.flashbook.flashbot.report.ReportEvent._
 import io.flashbook.flashbot.util.parseProductId
 
@@ -39,7 +39,7 @@ abstract class Strategy {
     * the `handleData` method. Each stream should complete when there is no more data, which auto
     * shuts down the strategy when all data streams complete.
     */
-  def initialize(params: Json, portfolio: Portfolio, loader: SessionLoader): Future[List[String]]
+  def initialize(params: Json, portfolio: Portfolio, loader: SessionLoader): Future[Seq[String]]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.
@@ -56,22 +56,22 @@ abstract class Strategy {
     */
   def handleCommand(command: StrategyCommand)(implicit ctx: TradingSession): Unit = {}
 
-  def orderTargetRatio(exchangeName: String,
-                       product: String,
-                       ratio: Double,
-                       key: String = DEFAULT,
-                       price: Option[Double] = None,
-                       scope: Scope = PairScope,
-                       postOnly: Boolean = false)
-                      (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
-      exchangeName,
-      TargetId(parseProductId(product), key),
-      Ratio(ratio, scope),
-      price,
-      postOnly
-    ))
-  }
+//  def orderTargetRatio(exchangeName: String,
+//                       product: String,
+//                       ratio: Double,
+//                       key: String = DEFAULT,
+//                       price: Option[Double] = None,
+//                       scope: Scope = PairScope,
+//                       postOnly: Boolean = false)
+//                      (implicit ctx: TradingSession): Unit = {
+//    ctx.handleEvents(OrderTarget(
+//      exchangeName,
+//      TargetId(parseProductId(product), key),
+//      Ratio(ratio, scope),
+//      price,
+//      postOnly
+//    ))
+//  }
 
   def order(exchangeName: String,
             product: String,
@@ -80,9 +80,9 @@ abstract class Strategy {
             price: Option[Double] = None,
             postOnly: Boolean = false)
            (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
+    ctx.send(OrderTarget(
       exchangeName,
-      TargetId(parseProductId(product), key),
+      TargetId(ctx.instruments(exchangeName, product), key),
       Amount(amount),
       price,
       postOnly
@@ -96,28 +96,23 @@ abstract class Strategy {
                     price: Option[Double] = None,
                     postOnly: Boolean = false)
                    (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(OrderTarget(
+    ctx.send(OrderTarget(
       exchangeName,
-      TargetId(parseProductId(product), key),
+      TargetId(ctx.instruments(exchangeName, product), key),
       Funds(funds),
       None,
       postOnly
     ))
   }
 
-  def setHedge(coin: String, position: Long)
-              (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SetHedge(coin, position))
-  }
-
   def record(name: String, value: Double, micros: Long)
             (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(TimeSeriesEvent(name, value, micros)))
+    ctx.send(SessionReportEvent(TimeSeriesEvent(name, value, micros)))
   }
 
   def record(name: String, candle: Candle)
             (implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(TimeSeriesCandle(name, candle)))
+    ctx.send(SessionReportEvent(TimeSeriesCandle(name, candle)))
   }
 
   def resolveAddress(address: Address): Option[Iterator[MarketData]] = None

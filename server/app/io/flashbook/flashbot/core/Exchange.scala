@@ -10,7 +10,7 @@ import io.flashbook.flashbot.engine.TradingSession
 import scala.concurrent.Future
 
 object Exchange {
-  case class ExchangeConfig(`class`: String, params: Json)
+  case class ExchangeConfig(`class`: String, params: Json, pairs: Map[String, Json])
 }
 
 abstract class Exchange {
@@ -20,11 +20,11 @@ abstract class Exchange {
 
   // API requests submitted to the exchange are fire-and-forget, hence the Unit return type
   def order(req: OrderRequest): Unit
-  def cancel(id: String, pair: Pair): Unit
+  def cancel(id: String, pair: Instrument): Unit
 
-  def baseAssetPrecision(pair: Pair): Int
-  def quoteAssetPrecision(pair: Pair): Int
-  def lotSize(pair: Pair): Option[Double] = None
+  def baseAssetPrecision(pair: Instrument): Int
+  def quoteAssetPrecision(pair: Instrument): Int
+  def lotSize(pair: Instrument): Option[Double] = None
 
   def useFundsForMarketBuys: Boolean = false
 
@@ -61,19 +61,19 @@ abstract class Exchange {
 sealed trait OrderRequest {
   val clientOid: String
   val side: Side
-  val product: Pair
+  val product: Instrument
 }
 
 final case class LimitOrderRequest(clientOid: String,
                                    side: Side,
-                                   product: Pair,
+                                   product: Instrument,
                                    size: Double,
                                    price: Double,
                                    postOnly: Boolean) extends OrderRequest
 
 final case class MarketOrderRequest(clientOid: String,
                                     side: Side,
-                                    product: Pair,
+                                    product: Instrument,
                                     size: Option[Double],
                                     funds: Option[Double]) extends OrderRequest
 

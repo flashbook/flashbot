@@ -3,6 +3,7 @@ package io.flashbook.flashbot.core
 import io.flashbook.flashbot.core.Order.{Buy, Fill, Sell}
 
 trait Instrument {
+
   // Unique string id such as "eth_usdt" or "xbtusd"
   def symbol: String
 
@@ -22,13 +23,11 @@ trait Instrument {
 
   def settlementPrice(prices: Map[Instrument, Double]): Option[Double]
 
-  override def toString: String = symbol
-
-  def settle(fill: Fill,
-             securityPosition: Position,
-             settlementPosition: Position): (Position, Position)
+  def execute(fill: Fill, portfolio: Portfolio): Portfolio
 
   def canShort: Boolean
+
+  override def toString: String = symbol
 }
 
 object Instrument {
@@ -39,7 +38,7 @@ object Instrument {
     override def settlementPrice(prices: Map[Instrument, Double]) = prices.get(this)
     override def canShort = false
 
-    override def settle(fill: Fill, secPos: Position, setPos: Position) = {
+    override def execute(fill: Fill, portfolio: Portfolio) = {
       fill.side match {
         /**
           * If we just bought some BTC using USD, then the fee was already subtracted
@@ -85,14 +84,17 @@ object Instrument {
     override def security = None
     override def settledIn = None
     override def settlementPrice(prices: Map[Instrument, Double]) = None
-    override def settle(exchange: String, fill: Fill, portfolio: Portfolio) = ???
+    override def execute(fill: Fill, portfolio: Portfolio) = {
+      throw new RuntimeException("Indexes are not tradable")
+    }
     override def canShort = false
   }
 
   trait Derivative extends Instrument {
     override def canShort = true
   }
-  trait FuturesContract extends Derivative
+  trait FuturesContract extends Derivative {
+    override def execute(fill: Fill, portfolio: Portfolio) = ???
+  }
   trait OptionsContract extends Derivative
-
 }

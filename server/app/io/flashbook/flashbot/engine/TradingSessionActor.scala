@@ -1,7 +1,7 @@
 package io.flashbook.flashbot.engine
 
 import java.util.concurrent.Executors
-import java.util.{Date, UUID}
+import java.util.UUID
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill}
@@ -9,13 +9,11 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import io.circe.Json
 import io.flashbook.flashbot.core.Action.{ActionQueue, CancelLimitOrder, PostLimitOrder, PostMarketOrder}
-import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
+import io.flashbook.flashbot.core.DataSource.DataSourceConfig
 import io.flashbook.flashbot.core.Exchange.ExchangeConfig
-import io.flashbook.flashbot.core.Order.{Buy, Fill, Sell}
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.util.stream._
 import io.flashbook.flashbot.util.time.currentTimeMicros
-import io.flashbook.flashbot.util.time.TimeFmt._
-import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.TradingEngine.EngineError
 import io.flashbook.flashbot.engine.TradingSession._
@@ -23,22 +21,21 @@ import io.flashbook.flashbot.exchanges.Simulator
 import io.flashbook.flashbot.report.ReportEvent._
 import io.flashbook.flashbot.report._
 
-import scala.collection.immutable.Queue
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future, SyncVar}
 import scala.util.{Failure, Success}
 
 class TradingSessionActor(dataDir: String,
-                   strategyClassNames: Map[String, String],
-                   dataSourceConfigs: Map[String, DataSourceConfig],
-                   exchangeConfigs: Map[String, ExchangeConfig],
-                   strategyKey: String,
-                   strategyParams: Json,
-                   mode: Mode,
-                   sessionEventsRef: ActorRef,
-                   initialBalances: Map[Account, Double],
-                   initialReport: Report) extends Actor with ActorLogging {
+                          strategyClassNames: Map[String, String],
+                          dataSourceConfigs: Map[String, DataSourceConfig],
+                          exchangeConfigs: Map[String, ExchangeConfig],
+                          strategyKey: String,
+                          strategyParams: Json,
+                          mode: Mode,
+                          sessionEventsRef: ActorRef,
+                          initialPortfolio: Portfolio,
+                          initialReport: Report) extends Actor with ActorLogging {
 
   implicit val ec: ExecutionContext = ExecutionContext.global
   implicit val system: ActorSystem = context.system
@@ -77,21 +74,21 @@ class TradingSessionActor(dataDir: String,
         .asSubclass(classOf[Strategy]))
     } catch {
       case err: ClassNotFoundException =>
-        return Left(
+        return Future.failed(
           EngineError(s"Strategy class not found: ${strategyClassNames(strategyKey)}", Some(err)))
 
       case err: ClassCastException =>
-        return Left(EngineError(s"Class ${strategyClassNames(strategyKey)} must be a " +
+        return Future.failed(EngineError(s"Class ${strategyClassNames(strategyKey)} must be a " +
           s"subclass of io.flashbook.core.Strategy", Some(err)))
     }
 
     // Instantiate the strategy
     try {
       strategyOpt = Some(strategyClassOpt.get.newInstance)
-//        strategyOpt.get.buffer = Some(new VarBuffer(initialReport.values.mapValues(_.value)))
+      strategyOpt.get.buffer = Some(new VarBuffer(initialReport.values.mapValues(_.value)))
     } catch {
       case err: Throwable =>
-        return Left(EngineError(s"Strategy instantiation error: $strategyKey", Some(err)))
+        return Future.failed(EngineError(s"Strategy instantiation error: $strategyKey", Some(err)))
     }
 
     var dataSources = Map.empty[String, DataSource]
@@ -131,121 +128,100 @@ class TradingSessionActor(dataDir: String,
       }
     }
 
+    // Create the session loader
+    val sessionLoader = new SessionLoader()
+
     // Initialize the strategy and collect the data source addresses it returns
-    var dataSourceAddresses = Seq.empty[Address]
-    try {
-      // TODO: Should we hide data source config expansion behind a flag?
-      // Or be smart about it some other way?
-
-//        val expandedDataSourceConfigs = dataSourceConfigs.map {
-//          case (k, c) => (k, c.copy(topics = c.topics.flatMap {
-//            case ("*", value: Json) =>
-//              val foo  = loadDataSource(k)
-//              println("** 2", k, foo)
-//              val res = foo.index.toSeq.map((_, value))
-//              println("** 2 res", res)
-//              res
-//            case kv: (String, Json) =>
-//              println("** 3")
-//              Seq(kv)
-//          }))
-//        }
-      dataSourceAddresses = strategyOpt.get
-        .initialize(strategyParams, dataSourceConfigs, initialBalances)
-        .map(DataSource.parseAddress)
-    } catch {
-      case err: EngineError =>
-        return Left(err)
-      case err: Throwable =>
-        return Left(EngineError(s"Strategy initialization error: $strategyKey", Some(err)))
-    }
-
-    // Initialization validation
-    if (dataSourceAddresses.isEmpty) {
-      return Left(EngineError(s"Strategy must declare at least one data source " +
-        s"during initialization."))
-    }
-
-    // Validate and load requested data sources.
-    // Also load exchanges instances while we're at it.
-    var exchanges = Map.empty[String, Exchange]
-    for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
-      try {
-        loadDataSource(srcKey)
-      } catch {
-        case err: EngineError =>
-          return Left(err)
-      }
-
-      if (exchangeConfigs.isDefinedAt(srcKey)) {
-        val exClass = exchangeConfigs(srcKey).`class`
-        var classOpt: Option[Class[_ <: Exchange]] = None
-        try {
-          classOpt = Some(getClass.getClassLoader
-            .loadClass(exClass)
-            .asSubclass(classOf[Exchange]))
-        } catch {
-          case err: ClassNotFoundException =>
-            return Left(EngineError("Exchange class not found: " + exClass, Some(err)))
-          case err: ClassCastException =>
-            return Left(EngineError(s"Class $exClass must be a " +
-              s"subclass of io.flashbook.core.Exchange", Some(err)))
+    strategyOpt.get
+      .initialize(strategyParams, initialPortfolio, sessionLoader)
+      .map(_.map(DataSource.parseAddress))
+      .flatMap { dataSourceAddresses =>
+        // Initialization validation
+        if (dataSourceAddresses.isEmpty) {
+          return Future.failed(EngineError(s"Strategy must declare at least one data source " +
+            s"during initialization."))
         }
 
-        try {
-          val instance: Exchange = classOpt.get.getConstructor(
-            classOf[Json], classOf[ActorSystem], classOf[ActorMaterializer])
-            .newInstance(exchangeConfigs(srcKey).params, system, mat)
-          val finalTickInstance =
-            if (mode == Live) instance
-            else new Simulator(instance)
-          finalTickInstance.setTickFn(() => {
-            emitTick(Tick(Some(srcKey), None))
-          })
-          exchanges = exchanges + (srcKey -> finalTickInstance)
-        } catch {
-          case err: Throwable =>
-            return Left(EngineError(s"Exchange instantiation error: $srcKey", Some(err)))
-        }
-      }
-    }
-
-    val markets: Map[String, Set[Pair]] = dataSourceAddresses
-      .filter {
-        case Address(srcKey, topic, _) =>
-          var parseError = false
+        // Validate and load requested data sources.
+        // Also load exchanges instances while we're at it.
+        var exchanges = Map.empty[String, Exchange]
+        for (srcKey <- dataSourceAddresses.map(_.srcKey).toSet[String]) {
           try {
-            parseProductId(topic)
+            loadDataSource(srcKey)
           } catch {
-            case _ =>
-              parseError = true
+            case err: EngineError =>
+              return Future.failed(err)
           }
 
-          exchanges.contains(srcKey) && !parseError
-      }
-      .groupBy(_.srcKey)
-      .mapValues(_.map(_.topic).map(parseProductId).toSet)
+          if (exchangeConfigs.isDefinedAt(srcKey)) {
+            val exClass = exchangeConfigs(srcKey).`class`
+            var classOpt: Option[Class[_ <: Exchange]] = None
+            try {
+              classOpt = Some(getClass.getClassLoader
+                .loadClass(exClass)
+                .asSubclass(classOf[Exchange]))
+            } catch {
+              case err: ClassNotFoundException =>
+                return Future.failed(EngineError("Exchange class not found: " + exClass, Some(err)))
+              case err: ClassCastException =>
+                return Future.failed(EngineError(s"Class $exClass must be a " +
+                  s"subclass of io.flashbook.core.Exchange", Some(err)))
+            }
 
-    Right(SessionSetup(markets, dataSourceAddresses, dataSources,
-      exchanges, strategyOpt.get, UUID.randomUUID.toString, currentTimeMicros))
+            try {
+              val instance: Exchange = classOpt.get.getConstructor(
+                classOf[Json], classOf[ActorSystem], classOf[ActorMaterializer])
+                .newInstance(exchangeConfigs(srcKey).params, system, mat)
+              val finalExchangeInstance =
+                if (mode == Live) instance
+                else new Simulator(instance)
+              finalExchangeInstance.setTickFn(() => {
+                emitTick(Tick(Seq.empty, Some(srcKey)))
+              })
+              exchanges = exchanges + (srcKey -> finalExchangeInstance)
+            } catch {
+              case err: Throwable =>
+                return Future.failed(
+                  EngineError(s"Exchange instantiation error: $srcKey", Some(err)))
+            }
+          }
+        }
+
+        def defaultInstruments(exchange: String): Set[Instrument] =
+          exchangeConfigs(exchange).pairs.keySet.map(CurrencyPair(_))
+
+        Future.sequence(exchanges
+          .map { case (k, v) =>
+            v.instruments.map((is: Set[Instrument]) => k -> (defaultInstruments(k) ++ is))
+          })
+          .map(_.toMap.mapValues(_.filter(instrument =>
+            dataSourceAddresses.map(_.topic).contains(instrument.symbol))))
+          .map(_.filterNot(_._2.isEmpty))
+          .map(_.mapValues(_.map(inst => inst.symbol -> inst).toMap))
+          .map(SessionSetup(
+            _, dataSourceAddresses, dataSources,
+            exchanges, strategyOpt.get, UUID.randomUUID.toString, currentTimeMicros
+          ))
+      }
+
   }
 
   def runSession(sessionSetup: SessionSetup): String = sessionSetup match {
-    case SessionSetup(markets, dataSourceAddresses, dataSources, exchanges,
+    case SessionSetup(instruments, dataSourceAddresses, dataSources, exchanges,
         strategy, sessionId, sessionMicros) =>
 
       /**
         * The trading session that we fold market data over.
         */
-      class Session(protected[engine] var portfolio: Portfolio = initialBalances,
-                    protected[engine] var prices: PriceMap = Map.empty[Market, Double],
+      class Session(val instruments: InstrumentIndex = instruments,
+                    protected[engine] var portfolio: Portfolio = initialPortfolio,
+                    protected[engine] var prices: PriceMap = PriceMap.empty,
                     protected[engine] var orderManagers: Map[String, OrderManager] =
-                        markets.mapValues(_ => OrderManager()),
-                     // Create action queue for every exchange
+                        instruments.mapValues(_ => OrderManager()),
+                    // Create action queue for every exchange
                     protected[engine] var actionQueues: Map[String, ActionQueue] =
-                        markets.mapValues(_ => ActionQueue()),
-                    protected[engine] var emittedReportEvents: Seq[ReportEvent] = Seq.empty,
-                    protected[engine] var hedges: mutable.Map[String, Double] = mutable.Map.empty)
+                        instruments.mapValues(_ => ActionQueue()),
+                    protected[engine] var emittedReportEvents: Seq[ReportEvent] = Seq.empty)
         extends TradingSession {
 
         override val id: String = sessionId
@@ -260,27 +236,11 @@ class TradingSessionActor(dataDir: String,
 
         def send(events: Any*): Unit = {
           sendFn(events)
-              event match {
-                case target: OrderTarget =>
-                  targets = targets.enqueue(target)
+        }
 
-                case SessionReportEvent(reportEvent) =>
-                  reportEvents = reportEvents.enqueue(reportEvent match {
-                    case tsEvent: TimeSeriesEvent =>
-                      tsEvent.copy(key = "local." + tsEvent.key)
-                    case tsCandle: TimeSeriesCandle =>
-                      tsCandle.copy(key = "local." + tsCandle.key)
-                    case otherReportEvent => otherReportEvent
-                  })
+        override def getPortfolio = portfolio
 
-                case msg: LogMessage =>
-                  // TODO: This should save to a db, not log to stdout...
-                  log.info(msg.message)
-
-                case h: SetHedge =>
-                  hedges += (h.coin -> h.position)
-              }
-          }
+        override def getActionQueues = actionQueues
       }
 
       val iteratorExecutor: ExecutionContext =
@@ -370,13 +330,10 @@ class TradingSessionActor(dataDir: String,
             .filter(exchanges.isDefinedAt)
           val exchange: Option[Exchange] = ex.map(exchanges(_))
 
-//          var newOMs = oms
-//          var newActions = actions
-
           // If this data has price info attached, emit that price info.
           data match {
             case Some(pd: Priced) => // I love pattern matching on types.
-              session.prices += (Market(pd.exchange, pd.product) -> pd.price)
+              session.prices = session.prices.withPrice(Market(pd.exchange, pd.product), pd.price)
               // TODO: Emit prices here
 //                emitReportEvent(PriceEvent(pd.exchange, pd.product, pd.price, pd.micros))
             case _ =>
@@ -424,28 +381,32 @@ class TradingSessionActor(dataDir: String,
           def acc(currency: String) = Account(ex.get, currency)
           session.portfolio = fills.foldLeft(session.portfolio) {
             case (portfolio, fill) =>
-              // Find accounts
-              val securityAccount = acc(fill.instrument.security.get)
-              val settlementAccount = acc(fill.instrument.settledIn.get)
-
-              // Settle
-              val (newSecPos, newSettlePos) = fill.instrument.settle(fill,
-                portfolio.position(securityAccount).get,
-                portfolio.position(settlementAccount).get)
-
-              // Update portfolio
-              val newPortfolio = portfolio
-                .withPosition(securityAccount, newSecPos)
-                .withPosition(settlementAccount, newSettlePos)
+              // Execute the fill on the portfolio
+              val newPortfolio = fill.instrument.execute(fill, portfolio)
 
               // Emit a trade event when we see a fill
               session.send(TradeEvent(
                 fill.tradeId, ex.get, fill.instrument.toString,
                 fill.micros, fill.price, fill.size))
 
-              // Also emit portfolio info
-              session.send(PositionEvent(securityAccount, newSecPos, fill.micros))
-              session.send(PositionEvent(settlementAccount, newSettlePos, fill.micros))
+              // Emit portfolio info:
+              // The settlement account must be an asset
+              val settlementAccount = acc(fill.instrument.settledIn.get)
+              session.send(BalanceEvent(settlementAccount,
+                newPortfolio.balance(settlementAccount), fill.micros))
+
+              // The security account may be a position or an asset
+              val market = Market(ex.get, fill.instrument.symbol)
+              val position = portfolio.positions.get(market)
+              if (position.isDefined) {
+                session.send(PositionEvent(market, position.get, fill.micros))
+              } else {
+                val assetAccount = acc(fill.instrument.security.get)
+                session.send(BalanceEvent(assetAccount,
+                  portfolio.balance(assetAccount), fill.micros))
+              }
+
+              // And calculate our equity.
               session.send(TimeSeriesEvent("equity_usd",
                 newPortfolio.equity("usd", session.prices), fill.micros))
 
@@ -454,18 +415,16 @@ class TradingSessionActor(dataDir: String,
           }
 
           // Call handleData and catch user errors.
-//          data match {
-//            case Some(md) =>
-//              currentStrategySeqNr = Some(session.seqNr)
-//              try {
-//                strategy.handleData(md)(sessionInstance)
-//              } catch {
-//                case e: Throwable =>
-//                  e.printStackTrace()
-//              }
-//              currentStrategySeqNr = None
-//            case None =>
-//          }
+          data match {
+            case Some(md) =>
+              try {
+                strategy.handleData(md)(session)
+              } catch {
+                case e: Throwable =>
+                  e.printStackTrace()
+              }
+            case None =>
+          }
 
           // Take our event buffer from the syncvar. This allows the next scan iteration to `put`
           // theirs in. Otherwise, `put` will block. Append to the events we received from a tick.
@@ -475,27 +434,29 @@ class TradingSessionActor(dataDir: String,
           events foreach {
             // Send report events to the events actor ref.
             case SessionReportEvent(reportEvent) =>
-              sessionEventsRef ! reportEvent
+              val re = reportEvent match {
+                case tsEvent: TimeSeriesEvent =>
+                  tsEvent.copy(key = "local." + tsEvent.key)
+                case tsCandle: TimeSeriesCandle =>
+                  tsCandle.copy(key = "local." + tsCandle.key)
+                case otherReportEvent => otherReportEvent
+              }
+              sessionEventsRef ! re
 
             // Send order targets to their corresponding order manager.
             case target: OrderTarget =>
               session.orderManagers += (target.exchangeName ->
                 session.orderManagers(target.exchangeName).submitTarget(target))
+
+            case LogMessage(msg) =>
+              log.info(msg)
           }
 
           // If necessary, expand the next target into actions and enqueue them for each
           // order manager.
           session.orderManagers.foreach {
             case (exName, om) =>
-              om.enqueueActions(
-                exchanges(exName),
-                session.actionQueues(exName),
-                session.balances.filter(_._1.exchange == exName)
-                  .map { case (acc, value) => (acc.asset, value) },
-                session.prices.filter(_._1.exchange == exName)
-                  .map { case (market, value) => (market.product, value) },
-                session.hedges.toMap
-              ) match {
+              om.enqueueActions(exchanges(exName), session.actionQueues(exName)) match {
                 case (newOm, newActions) =>
                   session.orderManagers += (exName -> newOm)
                   session.actionQueues += (exName -> newActions)
@@ -512,19 +473,19 @@ class TradingSessionActor(dataDir: String,
                     session.orderManagers += (exName ->
                       session.orderManagers(exName).initCreateOrder(targetId, clientId, action))
                     exchanges(exName).order(
-                      MarketOrderRequest(clientId, side, targetId.pair, size, funds))
+                      MarketOrderRequest(clientId, side, targetId.instrument, size, funds))
 
                   case action @ PostLimitOrder(clientId, targetId, side, size, price, postOnly) =>
                     session.orderManagers += (exName ->
                       session.orderManagers(exName).initCreateOrder(targetId, clientId, action))
                     exchanges(exName)
-                      .order(LimitOrderRequest(clientId, side, targetId.pair, size, price, postOnly))
+                      .order(LimitOrderRequest(clientId, side, targetId.instrument, size, price, postOnly))
 
                   case CancelLimitOrder(targetId) =>
                     session.orderManagers += (exName ->
                       session.orderManagers(exName).initCancelOrder(targetId))
                     exchanges(exName).cancel(
-                      session.orderManagers(exName).ids.actualIdForTargetId(targetId), targetId.pair)
+                      session.orderManagers(exName).ids.actualIdForTargetId(targetId), targetId.instrument)
                 }
               case _ =>
             }

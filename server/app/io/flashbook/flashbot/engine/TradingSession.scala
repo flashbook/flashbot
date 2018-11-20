@@ -10,8 +10,9 @@ import io.flashbook.flashbot.report.{Report, ReportDelta, ReportEvent}
 trait TradingSession {
   def id: String
   def send(events: Any*): Unit
-  def getBalances: Map[Account, Double]
+  def getPortfolio: Portfolio
   def getActionQueues: Map[String, ActionQueue]
+  def instruments: InstrumentIndex
 }
 
 object TradingSession {
@@ -23,7 +24,6 @@ object TradingSession {
                          size: FixedSize,
                          price: Option[Double],
                          postOnly: Boolean) extends Event
-  case class SetHedge(coin: String, position: Long) extends Event
   case class SessionReportEvent(event: ReportEvent) extends Event
 
 
@@ -44,13 +44,13 @@ object TradingSession {
                                  strategyParams: Json,
                                  mode: Mode,
                                  startedAt: Long,
-                                 balances: Map[Account, Double],
+                                 portfolio: Portfolio,
                                  report: Report) {
     def updateReport(delta: ReportDelta): TradingSessionState =
       copy(report = report.update(delta))
   }
 
-  case class SessionSetup(markets: Map[String, Set[Pair]],
+  case class SessionSetup(instruments: Map[String, Map[String, Instrument]],
                           dataSourceAddresses: Seq[Address],
                           dataSources: Map[String, DataSource],
                           exchanges: Map[String, Exchange],

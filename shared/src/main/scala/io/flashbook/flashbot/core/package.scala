@@ -6,7 +6,7 @@ import scala.concurrent.duration._
 import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
 import io.flashbook.flashbot.util.time.parseDuration
-import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core.Position._
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -43,22 +43,13 @@ package object core {
   case object Base extends PairRole
   case object Quote extends PairRole
 
-//  case class Pair(base: String, quote: String) {
-//    override def toString: String = s"${base}_$quote"
-//    def toSeq: Seq[String] = List(base, quote)
-//  }
-
-//  object Pair {
-//    def apply(str: String): Pair = parseProductId(str)
-//  }
-
   case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped
 
   case class TradeMD(source: String, topic: String, data: Trade)
     extends GenMD[Trade] with Priced {
 
     val dataType: String = "trades"
-    def product: Pair = parseProductId(topic)
+    def product: String = topic
     override def micros: Long = data.micros
 
     override def exchange: String = source
@@ -92,7 +83,7 @@ package object core {
     override def micros: Long = data.micros
     override def dataType: String = "tickers"
     override def exchange: String = source
-    override def product: Pair = parseProductId(topic)
+    override def product: String = topic
     override def price: Double = data.lastTradePrice
   }
 
@@ -103,7 +94,8 @@ package object core {
   case class BotConfig(strategy: String,
                        mode: String,
                        params: Json,
-                       initial_balances: Map[String, Double])
+                       initial_assets: Map[String, Double],
+                       initial_positions: Map[String, Position])
 
   trait Timestamped {
     def micros: Long
@@ -114,7 +106,7 @@ package object core {
 
   trait Priced {
     def exchange: String
-    def product: Pair
+    def product: String
     def price: Double
   }
 
@@ -125,9 +117,41 @@ package object core {
   case object Bid extends QuoteSide
   case object Ask extends QuoteSide
 
-  case class Account(exchange: String, security: String)
+  case class Account(exchange: String, security: String) {
+    override def toString = s"$exchange/$security"
+  }
+  object Account {
+    def parse(acc: String) = {
+      val parts = acc.split("/")
+      Account(parts(0), parts(1))
+    }
 
-  case class Market(exchange: String, instrument: Instrument)
+    implicit val accountKeyEncoder: KeyEncoder[Account] = new KeyEncoder[Account] {
+      override def apply(key: Account) = key.toString
+    }
+
+    implicit val accountKeyDecoder: KeyDecoder[Account] = new KeyDecoder[Account] {
+      override def apply(key: String) = Some(parse(key))
+    }
+  }
+
+  case class Market(exchange: String, symbol: String) {
+    override def toString = s"$exchange/$symbol"
+  }
+  object Market {
+    def parse(market: String) = {
+      val parts = market.split("/")
+      Market(parts(0), parts(1))
+    }
+
+    implicit val marketKeyEncoder: KeyEncoder[Market] = new KeyEncoder[Market] {
+      override def apply(key: Market) = key.toString
+    }
+
+    implicit val marketKeyDecoder: KeyDecoder[Market] = new KeyDecoder[Market] {
+      override def apply(key: String) = Some(parse(key))
+    }
+  }
 
   case class Tick(events: Seq[Any] = Seq.empty, exchange: Option[String] = None)
 
@@ -161,5 +185,5 @@ package object core {
                    extraBaseAssets: Set[String] = Set.empty,
                    basePegs: Boolean = false) extends Size
 
-  final case class TargetId(pair: Pair, key: String)
+  final case class TargetId(instrument: Instrument, key: String)
 }

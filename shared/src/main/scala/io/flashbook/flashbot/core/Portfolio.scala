@@ -1,10 +1,21 @@
 package io.flashbook.flashbot.core
 
+import io.circe.{Decoder, Encoder, KeyEncoder}
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
+import io.flashbook.flashbot.core._
+import io.circe.generic.semiauto._
+import io.circe.generic.auto._
+
 /**
   * Keeps track of asset balances and positions across all exchanges. Calculates equity and PnL.
   */
 case class Portfolio(assets: Map[Account, Double],
                      positions: Map[Market, Position]) {
+
+  def balance(account: Account): Double = assets.getOrElse(account, 0.0)
+
+  def withBalance(account: Account, balance: Double): Portfolio =
+    copy(assets = assets + (account -> balance))
 
   /**
     * Equity is the sum of the `targetAsset` values of all positions.
@@ -12,17 +23,18 @@ case class Portfolio(assets: Map[Account, Double],
   def equity(targetAsset: String, prices: PriceMap): Double =
     positions.values.map(_.value(targetAsset, prices)).sum
 
-  def position(account: Account): Option[Position] = positions.get(account)
+  def position(market: Market): Option[Position] = positions.get(market)
 
-  def withPosition(account: Account, position: Position): Portfolio =
-    positions + (account -> position)
+  def withPosition(market: Market, position: Position): Portfolio =
+    copy(positions = positions + (market -> position))
 
-  def updatePosition(account: Account, fn: Position => Position): Portfolio =
-    withPosition(account, fn(position(account)))
+  def updatePosition(market: Market, fn: Position => Position): Portfolio =
+    withPosition(market, fn(position(market)))
 
-  def filter(fn: ((Account, Position)) => Boolean): Portfolio = positions.filter(fn)
+  def closePositions(markets: Seq[Market], priceMap: PriceMap): Portfolio = ???
 
-  def close(markets: Seq[Market], priceMap: PriceMap): Portfolio = ???
+  def closePositions(priceMap: PriceMap): Portfolio =
+    closePositions(positions.keys.toSeq, priceMap)
 
   /**
     * Splits each account's total equity/buying power evenly among all given markets.
@@ -31,7 +43,7 @@ case class Portfolio(assets: Map[Account, Double],
                           priceMap: PriceMap,
                           equityDenomination: String): Map[Market, Double] = {
     // First close all positions.
-    val closed = this.close(markets, priceMap)
+    val closed = this.closePositions(priceMap)
 
     // Calculate total equity per account.
     val accountEquities: Map[Account, Double] =
@@ -56,9 +68,6 @@ case class Portfolio(assets: Map[Account, Double],
 }
 
 object Portfolio {
-  implicit def portfolio(balances: Map[Account, Position]): Portfolio = new Portfolio(balances)
-
-//  sealed trait Scope
-//  case object All extends Scope
-//  case class Assets(assets: Set[String], withPegged: Boolean) extends Scope
+  implicit val portfolioEn: Encoder[Portfolio] = deriveEncoder
+  implicit val portfolioDe: Decoder[Portfolio] = deriveDecoder
 }

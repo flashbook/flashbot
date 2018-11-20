@@ -47,7 +47,7 @@ object MarketData {
   }
 
   trait HasProduct {
-    def product: Pair
+    def product: Instrument
   }
 
 //  trait Priced extends HasProduct {
