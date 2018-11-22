@@ -5,9 +5,12 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.EMAIndicator
 import org.ta4j.core.indicators.helpers.{ClosePriceIndicator, GainIndicator}
+
+import scala.concurrent.Future
 
 class Scalper extends Strategy {
 
@@ -25,7 +28,7 @@ class Scalper extends Strategy {
   var ts: Option[TimeSeriesGroup] = None
   var params: Option[Params] = None
 
-  def product: Pair = util.parseProductId(params.get.market)
+  def product = CurrencyPair(params.get.market)
   lazy val closePrice = new ClosePriceIndicator(ts.get.get(params.get.exchange, product).get)
   lazy val shortEMA = new EMAIndicator(closePrice, params.get.short)
   lazy val longEMA = new EMAIndicator(closePrice, params.get.long)
@@ -35,8 +38,8 @@ class Scalper extends Strategy {
   var entry: Option[(Long, Double)] = None
 
   override def initialize(jsonParams: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig],
-                          initialBalances: Map[Account, Double]): List[String] = {
+                          portfolio: Portfolio,
+                          loader: SessionLoader) = Future.successful {
     params = Some(jsonParams.as[Params].right.get)
     ts = Some(new TimeSeriesGroup(params.get.bar_size))
     s"${params.get.exchange}/${params.get.market}/trades" :: Nil

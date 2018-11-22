@@ -3,9 +3,8 @@ package io.flashbook.flashbot.core
 import io.circe.generic.auto._
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.{Decoder, Encoder, KeyDecoder, KeyEncoder}
-import io.flashbook.flashbot.core.MarketData.GenMD
+import io.flashbook.flashbot.core.MarketData.{GenMD, HasProduct}
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core._
 
 import scala.collection.immutable.{SortedMap, TreeMap}
@@ -135,9 +134,9 @@ object AggBook {
   case class AggBookMD(source: String,
                        topic: String,
                        micros: Long,
-                       data: AggBook) extends GenMD[AggBook] {
-    def dataType: String = s"book_${data.depth}"
-    def product: Pair = parseProductId(topic)
+                       data: AggBook) extends GenMD[AggBook] with HasProduct {
+    override def dataType: String = s"book_${data.depth}"
+    override def product: String = topic
   }
 
   implicit val aggBookMDDecoder: Decoder[AggBookMD] = deriveDecoder[AggBookMD]

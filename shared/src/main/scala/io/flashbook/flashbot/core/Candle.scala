@@ -1,7 +1,6 @@
 package io.flashbook.flashbot.core
 
-import io.flashbook.flashbot.core.MarketData.GenMD
-import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core.MarketData.{GenMD, HasProduct}
 
 case class Candle(micros: Long,
                   open: Double,
@@ -25,12 +24,12 @@ object Candle {
   implicit val candleDe: Decoder[Candle] = deriveDecoder
 
   case class CandleMD(source: String, topic: String, data: Candle)
-    extends GenMD[Candle] with Priced {
+    extends GenMD[Candle] with Priced with HasProduct {
 
     override def micros: Long = data.micros
     override def dataType: String = "candles"
     override def exchange: String = source
-    override def product: Pair = parseProductId(topic)
+    override def product: String = topic
     override def price: Double = data.close
   }
 }

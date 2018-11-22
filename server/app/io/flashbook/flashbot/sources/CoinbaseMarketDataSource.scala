@@ -19,6 +19,7 @@ import io.flashbook.flashbot.engine.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.{OrderBookProvider, TimeLog}
 import io.flashbook.flashbot.util.time.TimeFmt
 import net.openhft.chronicle.queue.TailerDirection
@@ -35,10 +36,10 @@ class CoinbaseMarketDataSource extends DataSource {
 
   val NAME = "coinbase"
 
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit system: ActorSystem,
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit system: ActorSystem,
                       mat: ActorMaterializer): Unit = {
 
     val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
@@ -91,7 +92,7 @@ class CoinbaseMarketDataSource extends DataSource {
       })
       .run
     system.actorOf(Props(new LiveGDAXMarketData(fullStream ! _))) !
-      Subscribe(topics.keySet.map(util.parseProductId))
+      Subscribe(topics.keySet)
   }
 
   override def stream(dataDir: String, topic: String,
@@ -102,7 +103,7 @@ class CoinbaseMarketDataSource extends DataSource {
         case (FullBook, TimeRange(from, to)) =>
 
           val snapshotQueue =
-            timeLog[SnapshotItem](dataDir, util.parseProductId(topic), "book/snapshots")
+            timeLog[SnapshotItem](dataDir, topic, "book/snapshots")
 
           // Read the snapshots queue backwards until we can build up the latest snapshot.
           var snapOrders: Option[Queue[SnapshotOrder]] = None
@@ -122,7 +123,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
           if (snapOrders.isDefined) {
             val eventsQueue =
-              timeLog[APIOrderEvent](dataDir, util.parseProductId(topic), "book/events")
+              timeLog[APIOrderEvent](dataDir, topic, "book/events")
             val seq = snapOrders.get.head.seq
             var state = OrderBookMD[APIOrderEvent](NAME, topic).addSnapshot(seq, snapOrders.get)
 
@@ -142,7 +143,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
         case (Trades, TimeRange(from, to)) =>
           val tradesQueue =
-            timeLog[TradeMD](dataDir, util.parseProductId(topic), "trades")
+            timeLog[TradeMD](dataDir, topic, "trades")
           tradesQueue.scan(from, _.micros, md => md.micros < to)(tradesQueue.close)
 
         case (DepthBook(_), _) =>
@@ -153,7 +154,7 @@ class CoinbaseMarketDataSource extends DataSource {
     }
   }
 
-  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
     TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**
@@ -175,14 +176,14 @@ class CoinbaseMarketDataSource extends DataSource {
     import io.circe.generic.auto._
 
     var ws: Option[WebSocketClient] = None
-    var buffers = Map.empty[Pair, (Long, SortedSet[APIOrderEvent])]
+    var buffers = Map.empty[CurrencyPair, (Long, SortedSet[APIOrderEvent])]
     var subscribed = false
 
     case class OrderBookResponse(sequence: Long,
                                  bids: List[(String, String, String)],
                                  asks: List[(String, String, String)])
 
-    override def getSnapshot(p: Pair,
+    override def getSnapshot(p: String,
                              first: APIOrderEvent): Future[(Long, Seq[SnapshotOrder])] = {
       Http().singleRequest(HttpRequest(
         uri = s"https://api.gdax.com/products/$p/book?level=3"))
@@ -198,11 +199,11 @@ class CoinbaseMarketDataSource extends DataSource {
         )
       }
 
-    override def ingest(ps: Set[Pair], onEvent: APIOrderEvent => Unit): Unit = {
+    override def ingest(ps: Set[String], onEvent: APIOrderEvent => Unit): Unit = {
       // This is where we process every event coming in from the wire that occurs after we get
       // the initial "subscriptions" event. They are not guaranteed to be ordered correctly.
       def ingestEvent(ev: UnparsedAPIOrderEvent): Unit = {
-        val p: Pair = util.parseProductId(ev.product_id)
+        val p: CurrencyPair = ev.product_id
 
         // If this is the first event for this product, then initialize the buffer.
         if (!buffers.isDefinedAt(p)) {
@@ -303,18 +304,18 @@ class CoinbaseMarketDataSource extends DataSource {
     def toOrderEvent: OrderEvent = {
       `type` match {
         case "open" =>
-          OrderOpen(order_id.get, util.parseProductId(product_id), price.get, remaining_size.get,
+          OrderOpen(order_id.get, product_id, price.get, remaining_size.get,
             Side.parseSide(side.get))
         case "done" =>
-          OrderDone(order_id.get, util.parseProductId(product_id), Side.parseSide(side.get),
+          OrderDone(order_id.get, product_id, Side.parseSide(side.get),
             DoneReason.parse(reason.get), price, remaining_size)
         case "change" =>
-          OrderChange(order_id.get, util.parseProductId(product_id), price, new_size.get)
+          OrderChange(order_id.get, product_id, price, new_size.get)
         case "match" =>
-          OrderMatch(trade_id.get, util.parseProductId(product_id), micros, size.get, price.get,
+          OrderMatch(trade_id.get, product_id, micros, size.get, price.get,
             Side.parseSide(side.get), maker_order_id.get, taker_order_id.get)
         case "received" =>
-          OrderReceived(order_id.get, util.parseProductId(product_id), client_oid,
+          OrderReceived(order_id.get, product_id, client_oid,
             OrderType.parseOrderType(order_type.get))
       }
     }

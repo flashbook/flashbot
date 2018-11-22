@@ -12,10 +12,10 @@ object TwitterSearchDataSource {
 }
 
 class TwitterSearchDataSource extends DataSource {
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit sys: ActorSystem,
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit sys: ActorSystem,
                       mat: ActorMaterializer): Unit = ???
 
   override def stream(dataDir: String,

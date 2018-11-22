@@ -14,6 +14,9 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
     serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLServerDeps ++
     dataStores ++ timeSeriesDeps ++ testDeps ++ statsDeps
   ) ++ Seq(
+    "org.jgrapht" % "jgrapht" % "1.3.0",
+    "org.jgrapht" % "jgrapht-core" % "1.3.0",
+    "com.quantego" % "clp-java" % "1.16.10",
     "com.vmunier" %% "scalajs-scripts" % "1.1.2",
     "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
     "com.lihaoyi" %% "fansi" % "0.2.5",

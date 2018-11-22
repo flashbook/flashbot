@@ -1,24 +1,36 @@
 package io.flashbook.flashbot.core
 
+import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.scaladsl.{Flow, Sink, Source}
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.DataSource._
 import io.flashbook.flashbot.util.time.parseDuration
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.Future
+import scala.concurrent.duration._
 
-trait DataSource {
-  def index(implicit sys: ActorSystem,
-            mat: ActorMaterializer): Set[String] = {
-    throw new NotImplementedError
-  }
+abstract class DataSource(topics: Map[String, Json],
+                          dataTypes: Map[String, DataTypeConfig]) {
 
-  def ingest(dataDir: String,
-             topics: Map[String, Json],
-             dataTypes: Map[String, DataSource.DataTypeConfig])
+  def discoverTopics(implicit sys: ActorSystem,
+                     mat: ActorMaterializer): Future[Set[String]] =
+    Future.successful(Set.empty)
+
+  def typeProvider(dataType: String): DeltaFmt[_]
+
+  def scheduleIngest(topics: Set[String], dataType: String): IngestSchedule =
+    IngestOne(topics.head, 0 seconds)
+
+  def ingestGroup(topics: Set[String], dataType: String)
+                 (implicit sys: ActorSystem,
+                  mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]]
+
+  def ingest(topic: String, dataType: String)
             (implicit sys: ActorSystem,
-             mat: ActorMaterializer): Unit
+             mat: ActorMaterializer): Source[Timestamped, NotUsed]
 
   def stream(dataDir: String,
              topic: String,
@@ -27,6 +39,13 @@ trait DataSource {
 }
 
 object DataSource {
+
+  sealed trait IngestSchedule {
+    def delay: Duration
+  }
+  final case class IngestGroup(topics: Set[String], delay: Duration) extends IngestSchedule
+  final case class IngestOne(topic: String, delay: Duration) extends IngestSchedule
+
   final case class DataTypeConfig(retention: String)
 
   final case class DataSourceConfig(`class`: String,
@@ -41,15 +60,26 @@ object DataSource {
     case srcKey :: topic :: dataType :: Nil => Address(srcKey, topic, dataType)
   }
 
-  trait DataType
-  sealed trait BuiltInType extends DataType
-  case object FullBook extends BuiltInType
-  case class DepthBook(depth: Int) extends BuiltInType
-  case object Trades extends BuiltInType
-  case object Tickers extends BuiltInType
-  case class Candles(duration: FiniteDuration) extends BuiltInType
+  sealed trait BuiltInType[T] {
+    def fmt: DeltaFmt[T]
+  }
+  case object FullBook extends BuiltInType[FullBook.type] {
+    override def fmt: DeltaFmt[FullBook.type] = ???
+  }
+  case class DepthBook(depth: Int) extends BuiltInType[DepthBook] {
+    override def fmt: DeltaFmt[DepthBook] = ???
+  }
+  case object Trades extends BuiltInType[Trades.type] {
+    override def fmt = ???
+  }
+  case object Tickers extends BuiltInType[Tickers.type] {
+    override def fmt = ???
+  }
+  case class Candles(duration: FiniteDuration) extends BuiltInType[Candles] {
+    override def fmt = ???
+  }
 
-  def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
+  def parseBuiltInDataType(ty: String): Option[BuiltInType[_]] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
     case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
     case "candles" :: d :: Nil => Some(Candles(parseDuration(d)))

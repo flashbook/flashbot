@@ -12,6 +12,7 @@ trait TradingSession {
   def send(events: Any*): Unit
   def getPortfolio: Portfolio
   def getActionQueues: Map[String, ActionQueue]
+  def getPrices: PriceIndex
   def instruments: InstrumentIndex
 }
 
@@ -19,11 +20,14 @@ object TradingSession {
 
   trait Event
   case class LogMessage(message: String) extends Event
-  case class OrderTarget(exchangeName: String,
-                         targetId: TargetId,
+  case class OrderTarget(market: Market,
+                         key: String,
                          size: FixedSize,
                          price: Option[Double],
-                         postOnly: Boolean) extends Event
+                         once: Option[Boolean] = None,
+                         postOnly: Option[Boolean] = None) extends Event {
+    def id: String = s"$market:$key"
+  }
   case class SessionReportEvent(event: ReportEvent) extends Event
 
 
@@ -50,7 +54,7 @@ object TradingSession {
       copy(report = report.update(delta))
   }
 
-  case class SessionSetup(instruments: Map[String, Map[String, Instrument]],
+  case class SessionSetup(instruments: InstrumentIndex,
                           dataSourceAddresses: Seq[Address],
                           dataSources: Map[String, DataSource],
                           exchanges: Map[String, Exchange],

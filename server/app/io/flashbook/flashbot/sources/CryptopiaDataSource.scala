@@ -10,13 +10,14 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import io.flashbook.flashbot.core.AggBook._
-import io.flashbook.flashbot.core.{Ask, Bid, DataSource, MarketData, Pair, Timestamped, AggBook => _, _}
+import io.flashbook.flashbot.core.{Ask, Bid, DataSource, MarketData, Timestamped, AggBook => _, _}
 import io.flashbook.flashbot.util
 import io.flashbook.flashbot.core.DataSource._
 import io.flashbook.flashbot.engine.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TimeLog
 
 import scala.collection.immutable.Queue
@@ -46,7 +47,7 @@ class CryptopiaDataSource extends DataSource {
       case "fetch" =>
         allBatches.dequeue match {
           case (batch, queue) =>
-            fetchOrders(batch.map(p => Pair(p.Symbol, p.BaseSymbol))) onComplete {
+            fetchOrders(batch.map(p => CurrencyPair(p.Symbol, p.BaseSymbol))) onComplete {
               case Success(orders) =>
                 val micros = util.time.currentTimeMicros
                 orders.foreach(ordersRef ! (_, micros))
@@ -68,8 +69,8 @@ class CryptopiaDataSource extends DataSource {
       scala.collection.immutable.Queue(pairs.values.toSeq.flatten:_*)
   }
 
-  override def index(implicit sys: ActorSystem,
-                     mat: ActorMaterializer): Set[String] = {
+  override def discoverTopics(implicit sys: ActorSystem,
+                              mat: ActorMaterializer): Set[String] = {
 
     val markets = Await.result(Http().singleRequest(HttpRequest(
       method = HttpMethods.GET,
@@ -100,13 +101,13 @@ class CryptopiaDataSource extends DataSource {
       .map(_.Label).toSet
   }
 
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
 
     val newTopics = topics.toSeq.flatMap {
-      case ("*", value) => index.toSeq.map((_, value))
+      case ("*", value) => discoverTopics.toSeq.map((_, value))
       case kv => Seq(kv)
     }.toMap
 
@@ -138,7 +139,7 @@ class CryptopiaDataSource extends DataSource {
     sys.actorOf(Props(new OrderFetchService(tradePairs, bookStream)))
   }
 
-  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
     TimeLog[T](new File(s"$dataDir/$SRC/$product/$name"))
 
   override def stream(dataDir: String,
@@ -147,14 +148,14 @@ class CryptopiaDataSource extends DataSource {
                       timeRange: TimeRange): Iterator[MarketData] = {
     parseBuiltInDataType(dataType) match {
       case Some(DepthBook(BOOK_DEPTH)) =>
-        var tl: TimeLog[AggBookMD] = timeLog[AggBookMD](dataDir, util.parseProductId(topic), dataType)
+        var tl: TimeLog[AggBookMD] = timeLog[AggBookMD](dataDir, topic, dataType)
         tl.scan[Long](timeRange.from, _.micros, md => md.micros < timeRange.to)()
     }
   }
 
-  def fetchOrders(pairs: Seq[Pair])(implicit sys: ActorSystem,
-                                    ec: ExecutionContext,
-                                    mat: Materializer): Future[Seq[Orders]] =
+  def fetchOrders(pairs: Seq[CurrencyPair])(implicit sys: ActorSystem,
+                                            ec: ExecutionContext,
+                                            mat: Materializer): Future[Seq[Orders]] =
     Http().singleRequest(HttpRequest(
       method = HttpMethods.GET,
       uri = "https://www.cryptopia.co.nz/api/GetMarketOrderGroups/" +

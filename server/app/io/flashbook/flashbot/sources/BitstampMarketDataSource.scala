@@ -14,14 +14,15 @@ import com.pusher.client.Pusher
 import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD, fromOrderBook}
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
 import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
-import io.flashbook.flashbot.core.{Canceled, DataSource, Filled, FuzzyBook, MarketData, Order, OrderChange, OrderDone, OrderEvent, OrderOpen, Pair, RawOrderEvent, TimeRange, Timestamped, Trade, TradeMD}
-import io.flashbook.flashbot.core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.core._
+import io.flashbook.flashbot.core.DataSource.{DepthBook, Trades, parseBuiltInDataType}
 import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.optics.JsonPath._
 import io.circe.parser._
 import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TimeLog
 
 import scala.collection.immutable.Queue
@@ -36,7 +37,8 @@ object BitstampMarketDataSource {
   val CHANGED = "order_changed"
   val DELETED = "order_deleted"
 
-  private def formatPair(pair: Pair): String = (pair.base + pair.quote).toLowerCase
+  private def formatPair(pair: CurrencyPair): String =
+    (pair.base + pair.quote).toLowerCase
 
   case class BitstampBookEvent(event: String,
                                product: String,
@@ -54,7 +56,7 @@ object BitstampMarketDataSource {
       case CREATED =>
         OrderOpen(
           id.toString,
-          util.parseProductId(product),
+          product,
           price,
           amount,
           if (order_type == 0) Buy else Sell
@@ -63,7 +65,7 @@ object BitstampMarketDataSource {
       case CHANGED =>
         OrderChange(
           id.toString,
-          util.parseProductId(product),
+          product,
           Some(price),
           amount
         )
@@ -71,7 +73,7 @@ object BitstampMarketDataSource {
       case DELETED =>
         OrderDone(
           id.toString,
-          util.parseProductId(product),
+          product,
           if (order_type == 0) Buy else Sell,
           if (amount == 0) Filled else Canceled,
           Some(price),
@@ -96,7 +98,7 @@ object BitstampMarketDataSource {
     * An actor that connects to the Bitstamp API (REST and WebSocket) to reconstruct an
     * order book for the provided product and emit the book to the receiver on each update.
     */
-  class BitstampOrderBookProvider(pair: Pair,
+  class BitstampOrderBookProvider(pair: CurrencyPair,
                                   pusher: Pusher,
                                   bookReceiver: ActorRef) extends Actor {
     implicit val system: ActorSystem = context.system
@@ -187,7 +189,7 @@ object BitstampMarketDataSource {
   }
 
 
-  class BitstampTradesProvider(pair: Pair,
+  class BitstampTradesProvider(pair: CurrencyPair,
                                pusher: Pusher,
                                tradesReceiver: ActorRef) extends Actor {
 
@@ -277,10 +279,10 @@ object BitstampMarketDataSource {
 class BitstampMarketDataSource extends DataSource {
   import BitstampMarketDataSource._
 
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
 
     val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
 
@@ -321,7 +323,7 @@ class BitstampMarketDataSource extends DataSource {
           .run
 
         // Create an order book provider for each product.
-        topics.keySet.map(util.parseProductId).foreach(pair => {
+        topics.keySet.foreach(pair => {
           sys.actorOf(
             Props(new BitstampOrderBookProvider(pair, pusher, bookRef)),
             s"bitstamp-order-book-provider-$pair")
@@ -339,7 +341,7 @@ class BitstampMarketDataSource extends DataSource {
           })
           .run
 
-        topics.keySet.map(util.parseProductId).foreach(pair => {
+        topics.keySet.foreach(pair => {
           sys.actorOf(
             Props(new BitstampTradesProvider(pair, pusher, tradesRef)),
             s"bitstamp-trades-provider-$pair")
@@ -347,7 +349,7 @@ class BitstampMarketDataSource extends DataSource {
     }
   }
 
-  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
     TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**
@@ -357,7 +359,6 @@ class BitstampMarketDataSource extends DataSource {
   case class SnapshotItem(order: SnapshotOrder, micros: Long, index: Int, total: Int)
     extends Timestamped
 
-
   override def stream(dataDir: String,
                       topic: String,
                       dataType: String,
@@ -365,12 +366,12 @@ class BitstampMarketDataSource extends DataSource {
     parseBuiltInDataType(dataType) match {
       case Some(x) => (x, timeRange) match {
         case (DepthBook(depth), TimeRange(from, to)) =>
-          val queue = timeLog[AggBookMD](dataDir, util.parseProductId(topic), s"book_$depth")
+          val queue = timeLog[AggBookMD](dataDir, topic, s"book_$depth")
           queue.scan[Long](from, _.micros, data => data.micros < to)(queue.close)
 
         case (Trades, TimeRange(from, to)) =>
           println("Streaming trades???", from, to)
-          val queue = timeLog[TradeMD](dataDir, util.parseProductId(topic), "trades")
+          val queue = timeLog[TradeMD](dataDir, topic, "trades")
           queue.scan[Long](from, _.micros, data => data.micros < to) { () =>
             println("closing queue")
             queue.close()

@@ -1,12 +1,15 @@
 package io.flashbook.flashbot.core
 
 
+import java.util.UUID
+
 import io.circe._
 import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TradingSession
 import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent}
 import io.flashbook.flashbot.report.ReportEvent._
-import io.flashbook.flashbot.util.parseProductId
+import io.flashbook.flashbot.core.Convert._
 
 import scala.concurrent.Future
 
@@ -30,7 +33,7 @@ abstract class Strategy {
     * Generate a self-describing StrategyInfo instance given the FlashbotScope in which this
     * strategy will run.
     */
-  def info(loader: SessionLoader): Future[StrategyInfo]
+  def info(loader: SessionLoader): Future[Option[StrategyInfo]] = Future.successful(None)
 
   /**
     * During initialization, strategies declare what data sources they need by name, all of which
@@ -59,50 +62,111 @@ abstract class Strategy {
 //  def orderTargetRatio(exchangeName: String,
 //                       product: String,
 //                       ratio: Double,
-//                       key: String = DEFAULT,
 //                       price: Option[Double] = None,
-//                       scope: Scope = PairScope,
+//                       key: String = DEFAULT,
 //                       postOnly: Boolean = false)
 //                      (implicit ctx: TradingSession): Unit = {
-//    ctx.handleEvents(OrderTarget(
+//    val market = Market(exchangeName, product)
+//    val instrument = ctx.instruments(market)
+//    val targetNotionalPosition = PositionManager.percentGroup(ctx.getPortfolio,
+//      Seq(market),
+//      Map(instrument.security.get -> ratio),
+//      ctx.getPrices,
+//      equityDenomination = instrument.settledIn
+//    )(market)
+//
+//    ctx.send(OrderTarget(
 //      exchangeName,
-//      TargetId(parseProductId(product), key),
-//      Ratio(ratio, scope),
+//      TargetId(instrument, key),
+//      Quantity(???),
 //      price,
 //      postOnly
 //    ))
 //  }
 
-  def order(exchangeName: String,
-            product: String,
-            amount: Double,
-            key: String = DEFAULT,
-            price: Option[Double] = None,
-            postOnly: Boolean = false)
-           (implicit ctx: TradingSession): Unit = {
-    ctx.send(OrderTarget(
-      exchangeName,
-      TargetId(ctx.instruments(exchangeName, product), key),
-      Amount(amount),
-      price,
-      postOnly
-    ))
+  /**
+    * Usage:
+    *
+    * val up = order("up_limit", size = "10 usd")
+    * val downOrder = order(size = "20 usd", market = "btc/usd")
+    *
+    * val btcPositionOverall = position("my_pos", "btc")
+    * val btcPositionBitmex = position("my_pos", "btc", "bitmex")
+    *
+    * val ethPosition = btcPosition / 2
+    *
+    * if (something)
+    *   btcPosition("usd") = ethPosition("usd")
+    *
+    * maximize(ethPosition.as("ltc") - btcPosition.as("ltc"))
+    *
+    */
+
+  @Deprecated
+  def orderTargetRatio(exchange: String, product: String, ratio: Double)
+                      (implicit ctx: TradingSession): String = {
+    val pair = CurrencyPair(product)
+    val baseBalance = FixedSize(ctx.getPortfolio.assets(Account(exchange, pair.base)), pair.base)
+    val quoteBalance = FixedSize(ctx.getPortfolio.assets(Account(exchange, pair.quote)), pair.quote)
+
+    val notionalBase = baseBalance.as(pair.quote)(ctx.getPrices, ctx.instruments).get
+    val totalNotional = quoteBalance.amount + notionalBase.amount
+
+    val target = OrderTarget(
+      Market(exchange, product),
+      DEFAULT,
+      FixedSize(totalNotional * ratio, pair.quote),
+      None
+    )
+    ctx.send(target)
+    target.id
   }
 
-  def orderNotional(exchangeName: String,
-                    product: String,
-                    funds: Double,
-                    key: String = DEFAULT,
-                    price: Option[Double] = None,
-                    postOnly: Boolean = false)
-                   (implicit ctx: TradingSession): Unit = {
-    ctx.send(OrderTarget(
-      exchangeName,
-      TargetId(ctx.instruments(exchangeName, product), key),
-      Funds(funds),
-      None,
-      postOnly
-    ))
+  def limitOrder(market: Market,
+                 size: FixedSize,
+                 price: Double,
+                 key: String = DEFAULT,
+                 postOnly: Boolean = false)
+                (implicit ctx: TradingSession): String = {
+    val target = OrderTarget(
+      market,
+      key,
+      size,
+      Some(price),
+      once = Some(false),
+      postOnly = Some(postOnly)
+    )
+    ctx.send(target)
+    target.id
+  }
+
+  def limitOrderOnce(market: Market,
+                     size: FixedSize,
+                     price: Double,
+                     postOnly: Boolean = false)
+                    (implicit ctx: TradingSession): String = {
+    val target = OrderTarget(
+      market,
+      UUID.randomUUID().toString,
+      size,
+      Some(price),
+      once = Some(true),
+      postOnly = Some(postOnly)
+    )
+    ctx.send(target)
+    target.id
+  }
+
+  def marketOrder(market: Market, size: FixedSize)
+                 (implicit ctx: TradingSession): String = {
+    val target = OrderTarget(
+      market,
+      UUID.randomUUID().toString,
+      size,
+      None
+    )
+    ctx.send(target)
+    target.id
   }
 
   def record(name: String, value: Double, micros: Long)

@@ -197,7 +197,6 @@ class TradingSessionActor(dataDir: String,
           .map(_.toMap.mapValues(_.filter(instrument =>
             dataSourceAddresses.map(_.topic).contains(instrument.symbol))))
           .map(_.filterNot(_._2.isEmpty))
-          .map(_.mapValues(_.map(inst => inst.symbol -> inst).toMap))
           .map(SessionSetup(
             _, dataSourceAddresses, dataSources,
             exchanges, strategyOpt.get, UUID.randomUUID.toString, currentTimeMicros
@@ -215,12 +214,12 @@ class TradingSessionActor(dataDir: String,
         */
       class Session(val instruments: InstrumentIndex = instruments,
                     protected[engine] var portfolio: Portfolio = initialPortfolio,
-                    protected[engine] var prices: PriceMap = PriceMap.empty,
-                    protected[engine] var orderManagers: Map[String, OrderManager] =
-                        instruments.mapValues(_ => OrderManager()),
+                    protected[engine] var prices: PriceIndex = PriceIndex.empty,
+                    protected[engine] var orderManagers: Map[String, TargetManager] =
+                        instruments.instruments.mapValues(_ => TargetManager(instruments)),
                     // Create action queue for every exchange
                     protected[engine] var actionQueues: Map[String, ActionQueue] =
-                        instruments.mapValues(_ => ActionQueue()),
+                        instruments.instruments.mapValues(_ => ActionQueue()),
                     protected[engine] var emittedReportEvents: Seq[ReportEvent] = Seq.empty)
         extends TradingSession {
 
@@ -230,7 +229,7 @@ class TradingSessionActor(dataDir: String,
           * Events sent to the session are either emitted as a Tick, or added to the event buffer
           * if we can, so that the strategy can process events synchronously when possible.
           */
-        protected[engine] var sendFn: Seq[Any] => Unit = _ => {
+        protected[engine] var sendFn: Seq[Any] => Unit = { _ =>
           throw new RuntimeException("sendFn not defined yet.")
         }
 
@@ -241,6 +240,8 @@ class TradingSessionActor(dataDir: String,
         override def getPortfolio = portfolio
 
         override def getActionQueues = actionQueues
+
+        override def getPrices = prices
       }
 
       val iteratorExecutor: ExecutionContext =
@@ -382,7 +383,8 @@ class TradingSessionActor(dataDir: String,
           session.portfolio = fills.foldLeft(session.portfolio) {
             case (portfolio, fill) =>
               // Execute the fill on the portfolio
-              val newPortfolio = fill.instrument.execute(fill, portfolio)
+              val instrument = instruments(ex.get, fill.instrument)
+              val newPortfolio = instrument.execute(ex.get, fill, portfolio)
 
               // Emit a trade event when we see a fill
               session.send(TradeEvent(
@@ -391,24 +393,24 @@ class TradingSessionActor(dataDir: String,
 
               // Emit portfolio info:
               // The settlement account must be an asset
-              val settlementAccount = acc(fill.instrument.settledIn.get)
+              val settlementAccount = acc(instrument.settledIn)
               session.send(BalanceEvent(settlementAccount,
                 newPortfolio.balance(settlementAccount), fill.micros))
 
               // The security account may be a position or an asset
-              val market = Market(ex.get, fill.instrument.symbol)
+              val market = Market(ex.get, instrument.symbol)
               val position = portfolio.positions.get(market)
               if (position.isDefined) {
                 session.send(PositionEvent(market, position.get, fill.micros))
               } else {
-                val assetAccount = acc(fill.instrument.security.get)
+                val assetAccount = acc(instrument.security.get)
                 session.send(BalanceEvent(assetAccount,
                   portfolio.balance(assetAccount), fill.micros))
               }
 
               // And calculate our equity.
               session.send(TimeSeriesEvent("equity_usd",
-                newPortfolio.equity("usd", session.prices), fill.micros))
+                newPortfolio.equity()(session.prices), fill.micros))
 
               // Return updated portfolio
               newPortfolio
@@ -445,8 +447,8 @@ class TradingSessionActor(dataDir: String,
 
             // Send order targets to their corresponding order manager.
             case target: OrderTarget =>
-              session.orderManagers += (target.exchangeName ->
-                session.orderManagers(target.exchangeName).submitTarget(target))
+              session.orderManagers += (target.market.exchange ->
+                session.orderManagers(target.market.exchange).submitTarget(target))
 
             case LogMessage(msg) =>
               log.info(msg)
@@ -456,11 +458,12 @@ class TradingSessionActor(dataDir: String,
           // order manager.
           session.orderManagers.foreach {
             case (exName, om) =>
-              om.enqueueActions(exchanges(exName), session.actionQueues(exName)) match {
-                case (newOm, newActions) =>
-                  session.orderManagers += (exName -> newOm)
-                  session.actionQueues += (exName -> newActions)
-              }
+              om.enqueueActions(exchanges(exName), session.actionQueues(exName))(
+                session.prices, session.instruments) match {
+                  case (newOm, newActions) =>
+                    session.orderManagers += (exName -> newOm)
+                    session.actionQueues += (exName -> newActions)
+                }
           }
 
           // Here is where we tell the exchanges to do stuff, like place or cancel orders.

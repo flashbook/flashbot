@@ -37,7 +37,7 @@ object Order {
   case class Fill(orderId: String,
                   tradeId: Option[String],
                   fee: Double,
-                  instrument: Instrument,
+                  instrument: String,
                   price: Double,
                   size: Double,
                   micros: Long,

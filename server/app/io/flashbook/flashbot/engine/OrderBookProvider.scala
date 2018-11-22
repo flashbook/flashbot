@@ -3,7 +3,7 @@ package io.flashbook.flashbot.engine
 import akka.actor.Actor
 import akka.event.Logging
 import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
-import io.flashbook.flashbot.core.{Pair, RawOrderEvent}
+import io.flashbook.flashbot.core.RawOrderEvent
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
@@ -11,9 +11,9 @@ import scala.util.{Failure, Success}
 
 object OrderBookProvider {
   sealed trait BookActorCmd
-  final case class Snapshot(product: Pair,
+  final case class Snapshot(product: String,
                             snap: (Long, Seq[SnapshotOrder])) extends BookActorCmd
-  final case class Subscribe(products: Set[Pair]) extends BookActorCmd
+  final case class Subscribe(products: Set[String]) extends BookActorCmd
 }
 
 abstract class OrderBookProvider[E <: RawOrderEvent]
@@ -22,13 +22,13 @@ abstract class OrderBookProvider[E <: RawOrderEvent]
 
   implicit val ec: ExecutionContext = context.dispatcher
 
-  def getSnapshot(product: Pair, first: E): Future[(Long, Seq[SnapshotOrder])]
-  def ingest(ps: Set[Pair], onEvent: E => Unit): Unit
+  def getSnapshot(product: String, first: E): Future[(Long, Seq[SnapshotOrder])]
+  def ingest(ps: Set[String], onEvent: E => Unit): Unit
 
   val log = Logging(context.system, this)
-  var states: Map[Pair, OrderBookMD[E]] = Map.empty
-  var events: Map[Pair, Queue[E]] = Map.empty
-  var seenProducts: Set[Pair] = Set.empty
+  var states: Map[String, OrderBookMD[E]] = Map.empty
+  var events: Map[String, Queue[E]] = Map.empty
+  var seenProducts: Set[String] = Set.empty
   var initialized: Boolean = false
 
   override def receive: Receive = {

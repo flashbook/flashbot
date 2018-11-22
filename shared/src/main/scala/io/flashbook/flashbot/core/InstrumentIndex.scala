@@ -1,18 +1,21 @@
 package io.flashbook.flashbot.core
 
-import io.flashbook.flashbot.core.Instrument.CurrencyPair
+class InstrumentIndex(val instruments: Map[String, Set[Instrument]]) extends AnyVal {
+  def apply(exchange: String, symbol: String): Instrument = apply(Market(exchange, symbol))
+  def apply(market: Market): Instrument = get(market).get
+  def get(exchange: String, symbol: String): Option[Instrument] =
+    get(Market(exchange, symbol))
+  def get(market: Market): Option[Instrument] =
+    instruments(market.exchange).find(_.symbol == market.symbol)
 
-class InstrumentIndex(val instruments: Map[String, Map[String, Instrument]]) extends AnyVal {
-  def get(exchange: String, symbol: String): Option[Instrument] = for {
-    ex <- instruments.get(exchange)
-    inst <- ex.get(symbol)
-  } yield inst
+  def forExchange(exchange: String): InstrumentIndex = instruments.filterKeys(_ == exchange)
 
-  def apply(exchange: String, symbol: String): Instrument =
-    get(exchange, symbol).getOrElse(CurrencyPair(symbol))
+  def accounts: Set[Account] = instruments.flatMap { case (ex, insts) =>
+    insts.flatMap { inst => Set(Account(ex, inst.security.get), Account(ex, inst.settledIn)) }
+  }.toSet
 }
 
 object InstrumentIndex {
-  implicit def instrumentIndex(instruments: Map[String, Map[String, Instrument]]): InstrumentIndex
-    = InstrumentIndex(instruments)
+  implicit def instrumentIndex(instruments: Map[String, Set[Instrument]]): InstrumentIndex
+    = new InstrumentIndex(instruments)
 }

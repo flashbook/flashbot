@@ -22,14 +22,14 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
     def requestTime: Long
   }
   case class OrderReq(requestTime: Long, req: OrderRequest) extends APIRequest
-  case class CancelReq(requestTime: Long, id: String, pair: Pair) extends APIRequest
+  case class CancelReq(requestTime: Long, id: String, pair: Instrument) extends APIRequest
 
   private var apiRequestQueue = Queue.empty[APIRequest]
 
-  private var myOrders = Map.empty[Pair, OrderBook]
+  private var myOrders = Map.empty[String, OrderBook]
 
-  private var depths = Map.empty[Pair, AggBook]
-  private var prices = Map.empty[Pair, Double]
+  private var depths = Map.empty[String, AggBook]
+  private var prices = Map.empty[String, Double]
 
   override def makerFee: Double = base.makerFee
   override def takerFee: Double = base.takerFee
@@ -73,7 +73,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
                 // Either complete or open the limit order
                 val remainingSize = size - immediateFills.map(_.size).sum
                 if (remainingSize > 0) {
-                  myOrders = myOrders + (product ->
+                  myOrders = myOrders + (product.symbol ->
                     myOrders.getOrElse(product, OrderBook())
                       .open(clientOid, price, remainingSize, side))
                   events :+= OrderOpen(clientOid, product, price, remainingSize, side)
@@ -114,7 +114,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
               */
             case CancelReq(_, id, pair) =>
               val order = myOrders(pair).orders(id)
-              myOrders = myOrders + (pair -> myOrders(pair).done(id))
+              myOrders = myOrders + (pair.symbol -> myOrders(pair).done(id))
               events = events :+ OrderDone(id, pair, order.side, Canceled,
                 order.price, Some(order.amount))
           }
@@ -168,7 +168,6 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
             events :+= OrderDone(order.id, md.product, order.side, Filled, order.price, Some(0))
 
             // Emit the fill
-            println("SIMULATED FILL!!!!!!!!!!!!")
             fills :+= Fill(order.id, Some(md.data.id), makerFee, md.product, order.price.get,
               order.amount, md.micros, Maker, order.side)
           }
@@ -184,16 +183,16 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
     tick()
   }
 
-  override def cancel(id: String, pair: Pair): Unit = {
+  override def cancel(id: String, pair: Instrument): Unit = {
     apiRequestQueue = apiRequestQueue.enqueue(CancelReq(currentTimeMicros, id, pair))
     tick()
   }
 
-  override def baseAssetPrecision(pair: Pair): Int = base.baseAssetPrecision(pair)
+  override def baseAssetPrecision(pair: Instrument): Int = base.baseAssetPrecision(pair)
 
-  override def quoteAssetPrecision(pair: Pair): Int = base.quoteAssetPrecision(pair)
+  override def quoteAssetPrecision(pair: Instrument): Int = base.quoteAssetPrecision(pair)
 
   override def useFundsForMarketBuys: Boolean = base.useFundsForMarketBuys
 
-  override def lotSize(pair: Pair): Option[Double] = base.lotSize(pair)
+  override def lotSize(pair: Instrument): Option[Double] = base.lotSize(pair)
 }

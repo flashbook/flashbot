@@ -15,15 +15,20 @@ trait Instrument {
 
   // When you buy this instrument, what are you buying? This will usually be `base` in
   // the case of currency pairs, or `symbol` in the case of derivatives.
+  // If None, it's not tradable. Such as an index.
   def security: Option[String]
 
   // When you sell this instrument, what asset do you get back in exchange?
-  // If None, it's not tradable. Such as an index.
-  def settledIn: Option[String]
+  def settledIn: String
 
-  def settlementPrice(prices: Map[Instrument, Double]): Option[Double]
+  def markPrice(prices: PriceIndex): Double = prices(symbol)
 
-  def execute(fill: Fill, portfolio: Portfolio): Portfolio
+  def PNL(amount: Double, entryPrice: Double, exitPrice: Double): Double = {
+    if (security.get == base && settledIn == quote) amount * (exitPrice - entryPrice)
+    else throw new RuntimeException(s"Can't calculate default PNL for $this")
+  }
+
+  def execute(exchange: String, fill: Fill, portfolio: Portfolio): Portfolio
 
   def canShort: Boolean
 
@@ -34,11 +39,13 @@ object Instrument {
 
   case class CurrencyPair(base: String, quote: String) extends Instrument {
     override def symbol = s"${base}_$quote"
-    override def settledIn = Some(quote)
-    override def settlementPrice(prices: Map[Instrument, Double]) = prices.get(this)
+    override def settledIn = quote
+    override def security = Some(base)
+    override def markPrice(prices: PriceIndex) = prices(this)
     override def canShort = false
 
-    override def execute(fill: Fill, portfolio: Portfolio) = {
+    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = {
+      def acc(str: String) = Account(exchange, str)
       fill.side match {
         /**
           * If we just bought some BTC using USD, then the fee was already subtracted
@@ -55,24 +62,24 @@ object Instrument {
 
           // Total quote currency paid out to both maker and exchange
           val totalCost = rawCost / (1 - fill.fee)
-//          portfolio
-//            .updateBalance(acc(base), _ + size)
-//            .updateBalance(acc(quote), _ - totalCost)
+          portfolio
+            .updateBalance(acc(base), _ + fill.size)
+            .updateBalance(acc(quote), _ - totalCost)
 
         /**
           * If we just sold a certain amount of BTC for USD, then the fee is subtracted
           * from the USD that is to be credited to our account balance.
           */
         case Sell =>
-//          portfolio
-//            .updateBalance(acc(base), _ - size)
-//            .updateBalance(acc(quote), _ + size * price * (1 - fee))
+          portfolio
+            .updateBalance(acc(base), _ - fill.size)
+            .updateBalance(acc(quote), _ + fill.size * fill.price * (1 - fill.fee))
       }
     }
   }
 
   object CurrencyPair {
-    def apply(str: String): CurrencyPair = {
+    implicit def apply(str: String): CurrencyPair = {
       var list = str.split("-")
       if (list.length == 1)
         list = str.split("_")
@@ -82,9 +89,9 @@ object Instrument {
 
   case class Index(symbol: String, base: String, quote: String) extends Instrument {
     override def security = None
-    override def settledIn = None
-    override def settlementPrice(prices: Map[Instrument, Double]) = None
-    override def execute(fill: Fill, portfolio: Portfolio) = {
+    override def settledIn = ???
+    override def markPrice(prices: PriceIndex) = ???
+    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = {
       throw new RuntimeException("Indexes are not tradable")
     }
     override def canShort = false
@@ -94,7 +101,9 @@ object Instrument {
     override def canShort = true
   }
   trait FuturesContract extends Derivative {
-    override def execute(fill: Fill, portfolio: Portfolio) = ???
+    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = ???
   }
   trait OptionsContract extends Derivative
+
+  implicit def instrument2Str(inst: Instrument): String = inst.symbol
 }

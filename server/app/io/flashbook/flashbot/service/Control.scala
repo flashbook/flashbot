@@ -100,7 +100,7 @@ object Control {
     if (roles.contains("data-server")) {
       if (!dataServer.isSet) {
         dataServer.put(system.actorOf(Props(
-          new DataServer()
+          new DataServer(finalDataSources)
         ), "data-server"))
       }
 

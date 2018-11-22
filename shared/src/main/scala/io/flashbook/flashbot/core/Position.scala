@@ -3,11 +3,40 @@ package io.flashbook.flashbot.core
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto._
 
-case class Position(size: Double, leverage: Double, entryPrice: Double) {
+case class Position(size: Long, leverage: Double, entryPrice: Double) {
+
   /**
-    * How much is this position worth in terms of `targetAsset`?
+    * Updates the position size and average entry price.
+    * Returns the new position and any realized PNL that occurred as a side effect.
     */
-  def value(targetAsset: String, prices: PriceMap): Double = ???
+  def setSize(newSize: Long, instrument: Instrument, price: Double): (Position, Double) = {
+
+    // First stage, close existing positions if necessary. Record PNL.
+    var pnl: Double = 0
+    var tmpSize = size
+    if (isShort && newSize > size) {
+      tmpSize = math.min(newSize, 0)
+    } else if (isLong && newSize < size) {
+      tmpSize = math.max(newSize, 0)
+    }
+
+    if (tmpSize != size) {
+      pnl = instrument.PNL(size - tmpSize, entryPrice, price)
+    }
+
+    // Second stage, increase to new size and update entryPrice.
+    val enterSize = math.abs(newSize - tmpSize)
+    val newEntryPrice: Double =
+      (tmpSize * entryPrice + enterSize * price) / (tmpSize + enterSize)
+
+    (copy(
+      size = newSize,
+      entryPrice = newEntryPrice
+    ), pnl)
+  }
+
+  def isLong = size > 0
+  def isShort = size < 0
 }
 
 object Position {

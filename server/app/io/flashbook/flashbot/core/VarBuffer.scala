@@ -27,7 +27,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
     * Set and load a var. Update session. Handle errors.
     */
   def set[T : ClassTag](key: String, value: T)
-                       (implicit ctx: TradingSession, fmt: VarFmt[T]): Var[T] = {
+                       (implicit ctx: TradingSession, fmt: DeltaFmt[T]): Var[T] = {
 
     vars.get(key) match {
       /**
@@ -97,7 +97,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
     * Delete the var, no matter the type. Remove from session and from buffer.
     */
   def delete(key: String)(implicit ctx: TradingSession): Unit = {
-    ctx.handleEvents(SessionReportEvent(RemoveValueEvent(key)))
+    ctx.send(SessionReportEvent(RemoveValueEvent(key)))
     vars - key
   }
 
@@ -159,15 +159,15 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
   }
 
   def persistVar[T](current: Var[T], prev: Option[T])
-                   (implicit ctx: TradingSession, fmt: VarFmt[T]): Unit = {
+                   (implicit ctx: TradingSession, fmt: DeltaFmt[T]): Unit = {
     if (prev.isDefined) {
       val deltas = fmt.incDiff(current.value, prev.get)
       implicit val deltaDe: Decoder[fmt.D] = fmt.deltaDe
-      ctx.handleEvents(deltas.map(delta =>
+      ctx.send(deltas.map(delta =>
         SessionReportEvent(UpdateValueEvent(current.key, delta))):_*)
     } else {
       implicit val deltaDe: Decoder[T] = fmt.modelDe
-      ctx.handleEvents(SessionReportEvent(PutValueEvent(current.key, fmt.fmtName, current.value)))
+      ctx.send(SessionReportEvent(PutValueEvent(current.key, fmt.fmtName, current.value)))
     }
   }
 
@@ -182,7 +182,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
 
   def warn(msg: String)(implicit ctx: TradingSession): Unit = {
     println(msg)
-    ctx.handleEvents(LogMessage(msg))
+    ctx.send(LogMessage(msg))
   }
 }
 

@@ -1,19 +1,18 @@
 package io.flashbook.flashbot
 
 import scala.util.matching.Regex
-import io.flashbook.flashbot.core.Pair
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 
 package object util {
 
-  def parseProductId(str: String): Pair = {
-    var list = str.split("-")
-    if (list.length == 1)
-      list = str.split("_")
-    Pair(list(0), list(1))
-  }
+//  def parseProductId(str: String): Pair = {
+//    var list = str.split("-")
+//    if (list.length == 1)
+//      list = str.split("_")
+//    Pair(list(0), list(1))
+//  }
 
   val longVal: Regex = raw"^([0-9]+)$$".r
   val rmDot: Regex = raw"^([0-9]+)\.0+$$".r

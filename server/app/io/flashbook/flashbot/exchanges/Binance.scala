@@ -10,7 +10,7 @@ import akka.http.scaladsl.model.{HttpMethods, HttpRequest, StatusCodes, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
 import io.flashbook.flashbot.util.stripTrailingZeroes
-import io.flashbook.flashbot.core.{Exchange, Filled, LimitOrderRequest, MarketOrderRequest, OrderDone, OrderOpen, OrderReceived, OrderRequest, Pair}
+import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.core.Order.{Fill, Market, Taker}
 import io.flashbook.flashbot.core.Order.Side.parseSide
 import io.circe.Json
@@ -40,7 +40,7 @@ class Binance(params: Json)(implicit val system: ActorSystem,
   override def makerFee: Double = .0005
   override def takerFee: Double = .0005
 
-  def formatPair(pair: Pair): String = (pair.base + pair.quote).toUpperCase
+  def formatPair(pair: Instrument): String = (pair.base + pair.quote).toUpperCase
 
   case class FillRaw(price: String,
                      qty: String,
@@ -105,8 +105,8 @@ class Binance(params: Json)(implicit val system: ActorSystem,
           println("SUCCESS")
 
           val oid = rsp.orderId.toString
-          event(OrderReceived(oid, product, Some(clientOid), Market))
-          event(OrderDone(oid, product, side, Filled, None, None))
+          event(OrderReceived(oid, product.symbol, Some(clientOid), Market))
+          event(OrderDone(oid, product.symbol, side, Filled, None, None))
 
           rsp.fills.foreach { f =>
             val fl = Fill(oid, None, takerFee, product, f.price.toDouble,
@@ -124,15 +124,15 @@ class Binance(params: Json)(implicit val system: ActorSystem,
       }
   }
 
-  override def cancel(id: String, pair: Pair): Unit = ???
+  override def cancel(id: String, pair: Instrument): Unit = ???
 
-  override def baseAssetPrecision(pair: Pair): Int =
+  override def baseAssetPrecision(pair: Instrument): Int =
     exchangeInfo.symbol(formatPair(pair)).baseAssetPrecision
 
-  override def quoteAssetPrecision(pair: Pair): Int =
+  override def quoteAssetPrecision(pair: Instrument): Int =
     exchangeInfo.symbol(formatPair(pair)).quotePrecision
 
-  override def lotSize(pair: Pair): Option[Double] =
+  override def lotSize(pair: Instrument): Option[Double] =
     exchangeInfo.symbol(formatPair(pair)).filters
       .find(_.filterType == "LOT_SIZE").get.stepSize.map(_.toDouble)
 

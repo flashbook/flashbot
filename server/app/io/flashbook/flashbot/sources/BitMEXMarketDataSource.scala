@@ -8,10 +8,10 @@ import io.flashbook.flashbot.core.{DataSource, MarketData, TimeRange}
 import io.circe.Json
 
 class BitMEXMarketDataSource extends DataSource {
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit sys: ActorSystem,
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit sys: ActorSystem,
                       mat: ActorMaterializer): Unit = {
     println("Ingesting BitMEX")
   }

@@ -144,6 +144,14 @@ package object core {
       Market(parts(0), parts(1))
     }
 
+    def parseOpt(market: String): Option[Market] = {
+      var ret: Option[Market] = None
+      try {
+        ret = Some(parse(market))
+      }
+      ret
+    }
+
     implicit val marketKeyEncoder: KeyEncoder[Market] = new KeyEncoder[Market] {
       override def apply(key: Market) = key.toString
     }
@@ -151,6 +159,8 @@ package object core {
     implicit val marketKeyDecoder: KeyDecoder[Market] = new KeyDecoder[Market] {
       override def apply(key: String) = Some(parse(key))
     }
+
+    implicit def pairToMarket(pair: (String, String)): Market = Market(pair._1, pair._2)
   }
 
   case class Tick(events: Seq[Any] = Seq.empty, exchange: Option[String] = None)
@@ -160,30 +170,33 @@ package object core {
 
   sealed trait StrategyCommand
 
-  sealed trait Size
-  sealed trait FixedSize extends Size {
-    // Size can't be zero
-    def size: Double
-    def side: Side = size match {
-      case s if s < 0 => Sell
-      case s if s > 0 => Buy
-    }
-    def amount: Option[Double]
-    def funds: Option[Double]
-  }
+//  sealed trait Size
+//  sealed trait FixedSize extends Size {
+//    // Size can't be zero
+//    def size: Double
+//    def side: Side = size match {
+//      case s if s < 0 => Sell
+//      case s if s > 0 => Buy
+//    }
+//    def amount: Option[Double]
+//    def funds: Option[Double]
+//  }
+//
+//  case class Quantity(size: Double) extends FixedSize {
+//    override def amount: Option[Double] = Some(size.abs)
+//    override def funds: Option[Double] = None
+//  }
+//  object Quantity {
+//    implicit def buildQuantity(size: Double): Quantity = ???
+//  }
+//  case class QuantityOf(size: Double) extends FixedSize {
+//    override def amount: Option[Double] = None
+//    override def funds: Option[Double] = Some(size.abs)
+//  }
 
-  case class Amount(size: Double) extends FixedSize {
-    override def amount: Option[Double] = Some(size.abs)
-    override def funds: Option[Double] = None
-  }
-  case class Funds(size: Double) extends FixedSize {
-    override def amount: Option[Double] = None
-    override def funds: Option[Double] = Some(size.abs)
-  }
-
-  case class Ratio(ratio: Double,
-                   extraBaseAssets: Set[String] = Set.empty,
-                   basePegs: Boolean = false) extends Size
+//  case class Ratio(ratio: Double,
+//                   extraBaseAssets: Set[String] = Set.empty,
+//                   basePegs: Boolean = false) extends Size
 
   final case class TargetId(instrument: Instrument, key: String)
 }

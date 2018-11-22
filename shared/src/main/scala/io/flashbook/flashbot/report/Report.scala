@@ -35,11 +35,11 @@ case class Report(strategy: String,
     }
     case event: ValueEvent => copy(values = event match {
       case PutValueEvent(key, fmtName, anyValue) =>
-        val fmt = VarFmt.formats(fmtName)
+        val fmt = DeltaFmt.formats(fmtName)
         setVal(fmt, key, anyValue, values)
 
       case UpdateValueEvent(key, anyDelta) =>
-        val fmt = VarFmt.formats(values(key).fmtName)
+        val fmt = DeltaFmt.formats(values(key).fmtName)
         updateVal(fmt, key, anyDelta, values)
 
       case RemoveValueEvent(key) =>
@@ -47,13 +47,13 @@ case class Report(strategy: String,
     })
   }
 
-  private def setVal[T](fmt: VarFmt[T], key: String, value: Any,
+  private def setVal[T](fmt: DeltaFmt[T], key: String, value: Any,
                         values: ValuesMap): ValuesMap = {
     val tv = value.asInstanceOf[T]
     values + (key -> ReportValue(fmt.fmtName, tv))
   }
 
-  private def updateVal[T](fmt: VarFmt[T], key: String, delta: Any,
+  private def updateVal[T](fmt: DeltaFmt[T], key: String, delta: Any,
                            values: ValuesMap): ValuesMap = {
     val dv = delta.asInstanceOf[fmt.D]
     val v = values(key).asInstanceOf[T]
@@ -72,9 +72,13 @@ case class Report(strategy: String,
       genTimeSeriesDelta[PriceEvent](
         List("price", e.exchange, e.instrument.toString).mkString("."), e, _.price) :: Nil
 
+    case e: BalanceEvent =>
+      genTimeSeriesDelta[BalanceEvent](
+        List("balance", e.account.exchange, e.account.security).mkString("."), e, _.balance) :: Nil
+
     case e: PositionEvent =>
       genTimeSeriesDelta[PositionEvent](
-        List("balance", e.account.exchange, e.account.security).mkString("."), e, _.balance) :: Nil
+        List("position", e.market.exchange, e.market.symbol).mkString("."), e, _.position.size) :: Nil
 
     case e: TimeSeriesEvent =>
       genTimeSeriesDelta[TimeSeriesEvent](e.key, e, _.value) :: Nil
@@ -125,8 +129,8 @@ object Report {
     }
 
     def rvEncode[T](rv: ReportValue[T]): Json = {
-      VarFmt.formats(rv.fmtName) match {
-        case fmt: VarFmt[T] =>
+      DeltaFmt.formats(rv.fmtName) match {
+        case fmt: DeltaFmt[T] =>
           rvJsonEncoder(rv.map(value => fmt.modelEn(value)))
       }
     }
@@ -141,7 +145,7 @@ object Report {
     def reportVal(obj: Json): ReportValue[_] =
       rvJsonDecoder.decodeJson(obj) match {
         case Right(rv) =>
-          val fmt = VarFmt.formats(rv.fmtName)
+          val fmt = DeltaFmt.formats(rv.fmtName)
           rv.map(jsonVal => fmt.modelDe.decodeJson(jsonVal).right.get)
       }
   }

@@ -41,7 +41,7 @@ class TimeSeriesGroup(period: Duration) {
   }
 
   def record(exchange: String,
-            product: Pair,
+            product: Instrument,
             micros: Long,
             price: Double,
             amount: Option[Double]): Unit =
@@ -72,13 +72,13 @@ class TimeSeriesGroup(period: Duration) {
   }
 
   def record(exchange: String,
-             product: Pair,
+             product: Instrument,
              candle: Candle): Unit = record(exchange, product.toString, candle)
 
   def get(exchange: String, product: String): Option[TimeSeries] =
     allSeries.get(_key(exchange, product))
 
-  def get(exchange: String, product: Pair): Option[TimeSeries] = get(exchange, product.toString)
+  def get(exchange: String, product: Instrument): Option[TimeSeries] = get(exchange, product.toString)
 
   def _key(exchange: String, product: String): String = s"$exchange.$product"
 }

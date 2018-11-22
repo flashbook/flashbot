@@ -6,6 +6,7 @@ import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.engine.TradingSession
 
+import scala.concurrent.Future
 import scala.util.Random
 
 class OrderRandomly extends Strategy {
@@ -18,8 +19,8 @@ class OrderRandomly extends Strategy {
   val rand = new Random
 
   override def initialize(params: Json,
-                          dataSourceConfigs: Map[String, DataSourceConfig],
-                          initialBalances: Map[Account, Double]): List[String] = {
+                          portfolio: Portfolio,
+                          loader: SessionLoader) = Future.successful {
     _params = Some(params.as[Params].right.get)
     List(_params.get.exchange + "/" + _params.get.market + "/trades")
   }

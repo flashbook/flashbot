@@ -5,9 +5,8 @@ class Pegs(val pegs: Set[(String, String)]) extends AnyVal {
 
   def of(assets: Set[String]): Set[String] = {
     val pegMap = pegs.flatMap { case (a, b) => Set((a, b), (b, a))}.toMap
+    pegMap.filterKeys(assets.contains).values.toSet
   }
-
-  def without(assets: Set[String]): Pegs  = ???
 }
 
 object Pegs {
@@ -15,7 +14,10 @@ object Pegs {
 
   def default: Pegs = Set(
     ("usd", "usdt"),
+    ("usd", "usdc"),
+    ("usd", "dai"),
+    ("usd", "tusd"),
     ("usd", "bitusd"),
-    ("btc", "xbtusd")
+    ("btc", "xbt")
   )
 }

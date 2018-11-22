@@ -6,6 +6,7 @@ import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.core.Order.{Fill, Side}
 import io.flashbook.flashbot.engine.TradingSession
+import scala.math.BigDecimal.RoundingMode.HALF_DOWN
 
 import scala.concurrent.Future
 
@@ -55,7 +56,21 @@ abstract class Exchange {
 
   def genOrderId: String = randomUUID.toString
 
-  def instruments: Future[Set[Instrument]]
+  def instruments: Future[Set[Instrument]] = Future.successful(Set.empty)
+
+
+  def roundQuote(instrument: Instrument)(balance: Double): Double = BigDecimal(balance)
+    .setScale(quoteAssetPrecision(instrument), HALF_DOWN).doubleValue()
+  def roundBase(instrument: Instrument)(balance: Double): Double = BigDecimal(balance)
+    .setScale(baseAssetPrecision(instrument), HALF_DOWN).doubleValue()
+
+  def round(instrument: Instrument)(size: FixedSize): FixedSize =
+    if (size.security == instrument.security.get)
+      size.copy(amount = roundBase(instrument)(size.amount))
+    else if (size.security == instrument.settledIn)
+      size.copy(amount = roundQuote(instrument)(size.amount))
+    else throw new RuntimeException(s"Can't round $size for instrument $instrument")
+
 }
 
 sealed trait OrderRequest {

@@ -45,11 +45,11 @@ object ReportDelta {
     override def apply(a: ValueEvent): Json = a match {
       case ev @ PutValueEvent(key, fmtName, value) =>
         val putValueEventJson: PutValueEvent[Json] =
-          ev.copy(value = putValEn(VarFmt.formats(fmtName), value))
+          ev.copy(value = putValEn(DeltaFmt.formats(fmtName), value))
         putValueEvJsonEn(putValueEventJson)
 
       case ev @ UpdateValueEvent(key, delta) =>
-        val fmt = VarFmt.formats(report.values(key).fmtName)
+        val fmt = DeltaFmt.formats(report.values(key).fmtName)
         val updateValueEventJson: UpdateValueEvent[Json] =
           ev.copy(delta = updateDeltaEn(fmt, delta))
         updateValueEvJsonEn(updateValueEventJson)
@@ -57,14 +57,14 @@ object ReportDelta {
       case ev: RemoveValueEvent => rmValEn(ev)
     }
 
-    def putValEn[T](fmt: VarFmt[T], value: Any): Json = {
+    def putValEn[T](fmt: DeltaFmt[T], value: Any): Json = {
       value match {
         case typedValue: T =>
           fmt.modelEn(typedValue)
       }
     }
 
-    def updateDeltaEn[T](fmt: VarFmt[T], delta: Any): Json = {
+    def updateDeltaEn[T](fmt: DeltaFmt[T], delta: Any): Json = {
       delta match {
         case typedDelta: fmt.D =>
           fmt.deltaEn(typedDelta)
@@ -81,12 +81,12 @@ object ReportDelta {
             // Must decode as UpdateValueEvent
           case Left(_) => updateValueEvJsonDe(c) match {
             case Right(UpdateValueEvent(key, deltaJson)) =>
-              val fmt = VarFmt.formats(report.values(key).fmtName)
+              val fmt = DeltaFmt.formats(report.values(key).fmtName)
               fmt.deltaDe.decodeJson(deltaJson).right.map(UpdateValueEvent(key, _))
             case err => err
           }
           case Right(PutValueEvent(key, fmtName, jsonVal)) =>
-            val fmt = VarFmt.formats(fmtName)
+            val fmt = DeltaFmt.formats(fmtName)
             fmt.modelDe.decodeJson(jsonVal).right.map(PutValueEvent(key, fmtName, _))
         }
         case right => right

@@ -8,12 +8,14 @@ import io.flashbook.flashbot.core.Order.Buy
 import io.flashbook.flashbot.core._
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 import org.ta4j.core.indicators.volume.VWAPIndicator
 import io.flashbook.flashbot.util.TablePrinter
 
 import scala.collection.immutable.{Queue, TreeMap}
+import scala.concurrent.Future
 
 /**
   * The LimitOrderTest strategy is a POC of the Flashbot limit order functionality. It simply
@@ -34,8 +36,8 @@ class LimitOrderTest extends Strategy {
   var lastTrades = Queue.empty[TradeMD]
 
   override def initialize(paramsJson: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig],
-                          initialBalances: Map[Account, Double]): List[String] = {
+                          portfolio: Portfolio,
+                          loader: SessionLoader) = Future.successful {
     params = Some(paramsJson.as[Params].right.get)
     s"${params.get.exchange}/${params.get.product}/book_10" ::
       s"${params.get.exchange}/${params.get.product}/trades" :: Nil
@@ -68,11 +70,19 @@ class LimitOrderTest extends Strategy {
 
       book = Some(md.data)
 
+      val pair = CurrencyPair(md.product)
       // Place orders
-      order(params.get.exchange, params.get.product, params.get.order_size,
-        price = Some(bids.drop(0).head._1), key = "bid_quote")
-      order(params.get.exchange, params.get.product, -params.get.order_size,
-        price = Some(asks.drop(0).head._1), key = "ask_quote")
+      limitOrder(
+        (params.get.exchange, params.get.product),
+        (params.get.order_size, pair.base),
+        bids.drop(0).head._1,
+        "bid_quote")
+
+      limitOrder(
+        (params.get.exchange, params.get.product),
+        (-params.get.order_size, pair.base),
+        asks.drop(0).head._1,
+        "ask_quote")
 
       render()
 

@@ -16,11 +16,11 @@ import io.flashbook.flashbot.core.AggBook._
 import io.flashbook.flashbot.core.DataSource._
 import io.flashbook.flashbot.util
 import io.flashbook.flashbot.util.stream._
-import io.flashbook.flashbot.util.parseProductId
 import io.flashbook.flashbot.core.{DataSource, AggBook => _, _}
 import io.flashbook.flashbot.engine.TimeLog.{ScanDuration, TimeLog}
 import io.circe.{Decoder, Json}
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TimeLog
 import org.java_websocket.WebSocket
 import org.java_websocket.framing.Framedata
@@ -37,10 +37,10 @@ class BinanceMarketDataSource extends DataSource {
   val MAX_PRODUCTS = 10000
   val SNAPSHOT_INTERVAL = 10000
 
-  override def ingest(dataDir: String,
-                      topics: Map[String, Json],
-                      dataTypes: Map[String, DataSource.DataTypeConfig])
-                     (implicit system: ActorSystem,
+  override def ingestGroup(dataDir: String,
+                           topics: Map[String, Json],
+                           dataTypes: Map[String, DataSource.DataTypeConfig])
+                          (implicit system: ActorSystem,
                       mat: ActorMaterializer): Unit = {
     implicit val ec: ExecutionContext =
       ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
@@ -106,7 +106,7 @@ class BinanceMarketDataSource extends DataSource {
       }).run
 
     val depthUpdateStream = Source
-      .actorRef[(Pair, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
+      .actorRef[(CurrencyPair, DepthUpdateEvent)](Int.MaxValue, OverflowStrategy.fail)
       .groupBy(MAX_PRODUCTS, _._1)
 
       // At times, depth updates will be coming in from two different web sockets. This is
@@ -174,7 +174,7 @@ class BinanceMarketDataSource extends DataSource {
           system.actorOf(Props(
             new BinanceEventsProvider[TickerEvent](
               "arr",
-              topics.keySet.map(parseProductId),
+              topics.keySet.map(CurrencyPair(_)),
               (product, t) =>
                 tickersStream ! TickerMD(SRC, product.toString, Ticker(t.micros,
                   t.b.toDouble, t.B.toDouble, t.a.toDouble, t.A.toDouble,
@@ -188,7 +188,7 @@ class BinanceMarketDataSource extends DataSource {
           system.actorOf(Props(
             new BinanceEventsProvider[DepthUpdateEvent](
               "depth",
-              topics.keySet.map(parseProductId),
+              topics.keySet.map(CurrencyPair(_)),
               depthUpdateStream ! (_, _),
               s"${partNum}a"
             )
@@ -198,7 +198,7 @@ class BinanceMarketDataSource extends DataSource {
           system.actorOf(Props(
             new BinanceEventsProvider[TradeEvent](
               "trade",
-              topics.keySet.map(parseProductId),
+              topics.keySet.map(CurrencyPair(_)),
               (product, t) =>
                 tradeStream ! TradeMD(SRC, product.toString,
                   Trade(t.t.toString, t.micros, t.p.toDouble, t.q.toDouble, ???)),
@@ -224,7 +224,7 @@ class BinanceMarketDataSource extends DataSource {
     parseBuiltInDataType(dataType) match {
       case Some(DepthBook(BOOK_DEPTH)) =>
         val snapshotsLog =
-          timeLog[AggSnapshot](dataDir, parseProductId(topic), dataType + "/snapshots")
+          timeLog[AggSnapshot](dataDir, CurrencyPair(topic), dataType + "/snapshots")
 
         // Find the snapshot
         var state: Option[AggSnapshot] = None
@@ -244,7 +244,7 @@ class BinanceMarketDataSource extends DataSource {
 
         if (state.isDefined) {
           val eventsLog =
-            timeLog[DepthUpdateEvent](dataDir, parseProductId(topic), dataType + "/events")
+            timeLog[DepthUpdateEvent](dataDir, CurrencyPair(topic), dataType + "/events")
 
           // TODO: I think the scan `from` doesn't work, so just scanning from 0 here, UGLY and SLOW!
           for (event <- eventsLog.scan[Long](0, _.u, { event =>
@@ -276,14 +276,14 @@ class BinanceMarketDataSource extends DataSource {
         throw new RuntimeException(s"Invalid depth: $x")
 
       case Some(Trades) =>
-        val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, parseProductId(topic), dataType)
+        val tradesLog: TimeLog[TradeMD] = timeLog(dataDir, CurrencyPair(topic), dataType)
         tradesLog.scan(timeRange.from, _.micros,
           md => {
             md.micros < timeRange.to
           })()
 
       case Some(Tickers) =>
-        val tickersLog: TimeLog[TickerMD] = timeLog(dataDir, parseProductId(topic), dataType)
+        val tickersLog: TimeLog[TickerMD] = timeLog(dataDir, CurrencyPair(topic), dataType)
         tickersLog.scan(
           timeRange.from,
           _.micros,
@@ -371,7 +371,7 @@ class BinanceMarketDataSource extends DataSource {
     override def symbol: String = s
   }
 
-  def defaultWSPath(symbols: Map[String, Pair], streamName: String): String =
+  def defaultWSPath(symbols: Map[String, CurrencyPair], streamName: String): String =
     "stream?streams=" + symbols.keySet.map(_ + "@" + streamName).mkString("/")
 
   /**
@@ -379,10 +379,10 @@ class BinanceMarketDataSource extends DataSource {
     * because Binance shuts down single connections that are open for over 24 hours.
     */
   class BinanceEventsProvider[T <: RspBody](streamName: String,
-                                            products: Set[Pair],
-                                            updateFn: (Pair, T) => Unit,
+                                            products: Set[CurrencyPair],
+                                            updateFn: (CurrencyPair, T) => Unit,
                                             partNum: String,
-                                            wsPath: (Map[String, Pair],
+                                            wsPath: (Map[String, CurrencyPair],
                                               String) => String = defaultWSPath)
   (implicit de: Decoder[T]) extends Actor with ActorLogging {
 
@@ -393,7 +393,7 @@ class BinanceMarketDataSource extends DataSource {
 
     private val wsRotatePeriodMillis: Long = 1000 * 60 * 5
 
-    private val symbols = products.foldLeft(Map.empty[String, Pair]) {
+    private val symbols = products.foldLeft(Map.empty[String, CurrencyPair]) {
       case (memo, pair) => memo + ((pair.base + pair.quote) -> pair)
     }
 
@@ -499,7 +499,7 @@ class BinanceMarketDataSource extends DataSource {
     * Turn a depth update event stream into a stream of aggregated order books by requesting
     * a depth snapshot for every product and playing the depth update events on top.
     */
-  class AggBookProvider(product: Pair,
+  class AggBookProvider(product: CurrencyPair,
                         updateFn: (AggBookMD, DepthUpdateEvent) => Unit)
     extends Actor {
 
@@ -550,7 +550,7 @@ class BinanceMarketDataSource extends DataSource {
       }
     }
 
-    private def getSnapshot(p: Pair): Future[DepthSnapshotBody] = {
+    private def getSnapshot(p: CurrencyPair): Future[DepthSnapshotBody] = {
       println("getting snapshot")
       Http().singleRequest(HttpRequest(
         uri = "https://www.binance.com/api/v1/depth?" +
@@ -563,7 +563,7 @@ class BinanceMarketDataSource extends DataSource {
    * Helper functions
    */
 
-  private def timeLog[T <: Timestamped](dataDir: String, product: Pair, name: String) =
+  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
     TimeLog[T](new File(s"$dataDir/$SRC/$product/$name"))
 
   private def parsePricePoint(point: Seq[Json]): (Double, Double) =

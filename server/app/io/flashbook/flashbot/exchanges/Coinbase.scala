@@ -21,6 +21,4 @@ class Coinbase(params: Json)(implicit val system: ActorSystem,
   override def useFundsForMarketBuys: Boolean = true
 
   override def lotSize(pair: Instrument): Option[Double] = ???
-
-  override def instruments = ???
 }

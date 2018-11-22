@@ -1,6 +1,6 @@
 package io.flashbook.flashbot.exchanges
 
-import io.flashbook.flashbot.core.Instrument.FuturesContract
+import io.flashbook.flashbot.core.Instrument.{FuturesContract, Index}
 import io.flashbook.flashbot.core.Order.Fill
 import io.flashbook.flashbot.core._
 
@@ -29,35 +29,38 @@ class BitMEX extends Exchange {
 
 object BitMEX {
 
-  case object XBTUSD extends FuturesContract {
+  object XBTUSD extends FuturesContract {
     override def symbol = "XBTUSD"
     override def base = "xbt"
     override def quote = "usd"
-    override def settledIn = Some("xbt")
+    override def settledIn = "xbt"
 
-    // https://www.bitmex.com/app/seriesGuide/XBT#How-is-the-XBTUSD-Perpetual-Contract-Quoted
-    override def settlementPrice(prices: Map[Instrument, Double]) = for {
-      xbtusdPrice <- prices.map { case (k, v) => (k.symbol, v) }.get(symbol)
-      price <- 1.0 / xbtusdPrice
-    } yield price
+    override def markPrice(prices: PriceIndex) = 1.0 / prices(symbol)
 
     override def security = Some(symbol)
+
+    // https://www.bitmex.com/app/seriesGuide/XBT#How-is-the-XBTUSD-Perpetual-Contract-Quoted
+    override def PNL(amount: Double, entryPrice: Double, exitPrice: Double) =
+      amount * (1.0 / entryPrice - 1.0 / exitPrice)
   }
 
-  case object ETHUSD extends FuturesContract {
+  object ETHUSD extends FuturesContract {
     override def symbol = "ETHUSD"
     override def base = "eth"
     override def quote = "usd"
-    override def settledIn = Some("xbt")
+    override def settledIn = "xbt"
 
-    val bitcoinMultiplier = 0.000001
+    val bitcoinMultiplier: Double = 0.000001
 
-    // https://www.bitmex.com/app/seriesGuide/ETH#How-Is-The-ETHUSD-Perpetual-Contract-Quoted
-    override def settlementPrice(prices: Map[Instrument, Double]) = for {
-      ethusdPrice <- prices.map { case (k, v) => (k.symbol, v) }.get(symbol)
-      price <- ethusdPrice * bitcoinMultiplier
-    } yield price
+    override def markPrice(prices: PriceIndex) = ???
 
     override def security = Some(symbol)
+
+    // https://www.bitmex.com/app/seriesGuide/ETH#How-Is-The-ETHUSD-Perpetual-Contract-Quoted
+    override def PNL(amount: Double, entryPrice: Double, exitPrice: Double) = {
+      (exitPrice - entryPrice) * bitcoinMultiplier * amount
+    }
   }
+
+  object BXBT extends Index(".BXBT", "xbt", "usd")
 }

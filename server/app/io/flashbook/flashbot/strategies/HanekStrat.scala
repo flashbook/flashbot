@@ -9,11 +9,13 @@ import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.generic.auto._
 import io.flashbook.flashbot.core.Candle.CandleMD
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.{RSIIndicator, SMAIndicator, StochasticOscillatorDIndicator, StochasticOscillatorKIndicator}
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 import org.ta4j.core.indicators.statistics.{SimpleLinearRegressionIndicator, StandardDeviationIndicator}
 
+import scala.concurrent.Future
 import scala.io.Source
 import scala.util.matching.Regex
 import scala.concurrent.duration._
@@ -36,7 +38,7 @@ class HanekStrat extends Strategy {
     * Indicators
     */
   private lazy val tsg = new TimeSeriesGroup("1h")
-  private def pair = util.parseProductId(params.get.pair.toLowerCase)
+  private def pair = CurrencyPair(params.get.pair.toLowerCase)
   private def price = tsg.get("bitfinex", pair)
   private lazy val close = new ClosePriceIndicator(price.get)
   private lazy val rsi = new RSIIndicator(close, 10)
@@ -64,11 +66,12 @@ class HanekStrat extends Strategy {
   private lazy val stochMean = new SMAIndicator(stochD, params.get.meanLookback)
 
   override def initialize(jsonParams: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig],
-                          initialBalances: Map[Account, Double]) = {
-    params = Some(jsonParams.as[Params].right.get)
-    hedges = Map(pair.base -> -initialBalances(Account("bitfinex", pair.base)).floor.toLong)
-    s"bitfinex/${params.get.pair}/candles_1h" :: Nil
+                          portfolio: Portfolio,
+                          loader: SessionLoader) = {
+    Future.successful {
+      params = Some(jsonParams.as[Params].right.get)
+      s"bitfinex/${params.get.pair}/candles_1h" :: Nil
+    }
   }
 
   sealed trait Position
@@ -89,9 +92,9 @@ class HanekStrat extends Strategy {
     case StrategyOrderEvent(targetId, e: OrderEvent) =>
       e match {
         case OrderDone(_, _, Buy, Filled, _, _) =>
-          println("Bought", state, ctx.balances)
+          println("Bought", state, ctx.getPortfolio)
         case OrderDone(_, _, Sell, Filled, _, _) =>
-          println("Sold", state, ctx.balances)
+          println("Sold", state, ctx.getPortfolio)
         case _ =>
       }
   }
@@ -112,7 +115,7 @@ class HanekStrat extends Strategy {
   override def handleData(data: MarketData)(implicit ctx: TradingSession) = data match {
     case md @ CandleMD(source, topic, candle) =>
       val now = Instant.ofEpochMilli(md.micros / 1000)
-      hedges.foreach { case (k, v) => setHedge(k, v)}
+//      hedges.foreach { case (k, v) => setHedge(k, v)}
 
       tsg.record("bitfinex", md.product, candle)
       record("price", candle)
@@ -122,7 +125,7 @@ class HanekStrat extends Strategy {
       val stochVal = stochD.getValue(stochD.getTimeSeries.getEndIndex).doubleValue
 
       if (state == Neutral) {
-        record("usd_balance", ctx.balances(Account("bitfinex", "usd")), md.micros)
+        record("usd_balance", ctx.getPortfolio.balance(Account("bitfinex", "usd")), md.micros)
       }
 
       val rsiSlopeVal = rsiSlope.getValue(rsiSlope.getTimeSeries.getEndIndex).doubleValue
@@ -267,7 +270,7 @@ class HanekStrat extends Strategy {
 
   override def resolveAddress(address: Address): Option[Iterator[MarketData]] = address match {
     case Address("bitfinex", product, "candles_1h") =>
-      val pair = util.parseProductId(product)
+      val pair = CurrencyPair(product)
       val pairStr = (pair.base + pair.quote).toUpperCase
       val it = Source
         .fromInputStream(getClass.getResourceAsStream("/data/" +

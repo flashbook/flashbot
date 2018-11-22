@@ -340,7 +340,7 @@ object TradingEngine {
         case PositionUpdated(botId, market, position) =>
           val bot = bots(botId)
           copy(bots = bots + (botId -> bot.updated(bot.length - 1,
-            bot.last.copy(portfolio = bot.last.portfolio.withPosition(market, position)))))
+            bot.last.copy(portfolio = bot.last.portfolio.unsafeSetPosition(market, position)))))
 
       }
     }

@@ -5,17 +5,17 @@ import io.flashbook.flashbot.core.Order.{Limit, OrderType, Side}
 
 sealed trait OrderEvent {
   val orderId: String
-  val product: Pair
+  val product: String
 }
 
 final case class OrderOpen(orderId: String,
-                           product: Pair,
+                           product: String,
                            price: Double,
                            size: Double,
                            side: Side) extends OrderEvent
 
 final case class OrderDone(orderId: String,
-                           product: Pair,
+                           product: String,
                            side: Side,
                            reason: DoneReason,
                            price: Option[Double],
@@ -27,14 +27,14 @@ final case class OrderDone(orderId: String,
 }
 
 final case class OrderChange(orderId: String,
-                             product: Pair,
+                             product: String,
                              price: Option[Double],
                              newSize: Double) extends OrderEvent {
   def orderType: OrderType = if (price.isDefined) Limit else Order.Market
 }
 
 final case class OrderMatch(tradeId: Long,
-                            product: Pair,
+                            product: String,
                             micros: Long,
                             size: Double,
                             price: Double,
@@ -44,7 +44,7 @@ final case class OrderMatch(tradeId: Long,
 }
 
 final case class OrderReceived(orderId: String,
-                               product: Pair,
+                               product: String,
                                clientOid: Option[String],
                                `type`: OrderType) extends OrderEvent {
 }

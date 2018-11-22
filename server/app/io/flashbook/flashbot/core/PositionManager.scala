@@ -1,5 +1,7 @@
 package io.flashbook.flashbot.core
 
+import com.quantego
+
 /**
   * PositionManager is a set of functions that analyze a portfolio to answer questions about
   * positions. E.g. What is our current position in asset A? What trades are necessary to achieve
@@ -57,17 +59,17 @@ object PositionManager {
     *  2. Solve for positions
     * -------------------------
     *
-    * Bitmex:XBT      <----------------------------------- | -- XB ------------------------------->
+    * Bitmex:XBT      <----------------------------------- 0 -- XB ------------------------------->
     *
-    * Bitmex:XBTUSD   <----------------------------------- | ------- XU -------------------------->
+    * Bitmex:XBTUSD   <----------------------------------- 0 ------- XU -------------------------->
     *
-    * Bitmex:ETHUSD   <------------------ EU ------------- | ------------------------------------->
+    * Bitmex:ETHUSD   <------------------ EU ------------- 0 ------------------------------------->
     *
-    * Binance:BTC     <----------------------------------- | ----- 4k ---------------------------->
+    * Binance:BTC     <----------------------------------- 0 ----- 4k ---------------------------->
     *
-    * Net:BTC         <----------------------------------- | ------------- NB ------------ MaxP -->
+    * Net:BTC         <----------------------------------- 0 ------------- NB ------------ MaxP -->
     *
-    * Net:ETH         <------------------ NE ------------- | ----------------------------- MaxP -->
+    * Net:ETH         <------------------ NE ------------- 0 ----------------------------- MaxP -->
     *
     *
     *   XB = XBT wallet balance USD value
@@ -79,7 +81,7 @@ object PositionManager {
     *
     *
     *   Where:
-    *     XB > 0
+    *     XB >= 0
     *     $-72k <= XU <= $72k
     *     $-36k <= EU <= $36k
     *     XU/4 + EU/2 <= $18k
@@ -91,20 +93,48 @@ object PositionManager {
     *
     *   First solve for MaxP. Then calculate NB and NE, and solve for the rest of the variables.
     *
-    *
     * @param portfolio our whole portfolio
     * @param markets the markets that we'd like to calculate positions for
     * @param targetPercents a map of assets to the desired position percent
     * @param priceMap market prices
     * @param equityDenomination what is buying power equity in terms of? Defaults to USD.
-    * @return a map of notional position values per market that satisfy the given percentages.
+    * @return a map of equity position values per market that satisfy the given percentages.
     */
   def percentGroup(portfolio: Portfolio,
                    markets: Seq[Market],
                    targetPercents: Map[String, Double],
-                   priceMap: PriceMap,
-                   equityDenomination: String = "usd"): Map[Market, Double] = {
-    // TODO: Implement this with Choco Solver
+                   priceMap: PriceIndex,
+                   equityDenomination: String = "usd"): Map[Market, FixedSize] = {
+
+    val model = new quantego.clp.CLP()
+
+    // For all accounts in portfolio, create an account variable.
+
+    // For all positions in portfolio, create a position variable.
+
+    // For all unique assets in portfolio, create a net position variable.
+
+    // Constrain the net assets to each other via ratios.
+
+    // Maximize or minimize the net asset with the largest absolute value ratio.
+    // This is our maxP.
+
+    // Solve again, but this time with a hardcoded value for that asset's net position variable.
+
+    // Return the resulting portfolio position values as FixedSize instances of equityDenomination.
+
+
+//    val model = new Model("Position Solver (Percent Group)")
+//    val assets = targetPercents.keys.toSeq
+//    val netMaxVar = model.realVar("maxp", 0, 1000000.0, 0.01d)
+////    val netMaxVars = assets.map(asset => model.realVar(s"maxp_$asset", 0, 1000000.0, 0.01d))
+//
+//    val assetBalance = model.realVar("xbt_balance_usd", 0, 500000, .01d)
+//    val XU = model.realVar("xbtusd_position", 0, 500000, .01d)
+//    val EU = model.realVar("ethusd_position", 0, 500000, .01d)
+
+//    model.post(XU.gt(EU).ibex(.01d))
+
     ???
   }
 }

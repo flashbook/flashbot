@@ -14,7 +14,6 @@ import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueue
 import net.openhft.chronicle.threads.Pauser
 
-import scala.Option
 import scala.concurrent.duration._
 
 object TimeLog {
@@ -284,8 +283,6 @@ object TimeLog {
       }
 
       val found: Long = findIt
-//      println("found", found)
-//      println(tailer.toStart.index, tailer.toEnd.index)
 
       tailer.moveToIndex(found match {
         case -1 => 0
