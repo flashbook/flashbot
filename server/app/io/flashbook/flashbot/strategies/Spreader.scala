@@ -21,13 +21,13 @@ class Spreader extends Strategy {
 
   var params: Option[Props] = None
 
-  override def info(loader: SessionLoader) = {
-    Future.successful(StrategyInfo(SchemaFactory.default.createSchema[Props]))
-  }
+//  override def info(loader: SessionLoader) = {
+//    Future.successful(StrategyInfo(SchemaFactory.default.createSchema[Props]))
+//  }
 
   override def initialize(paramsJson: Json,
-                          dataSourceConfig: Map[String, DataSourceConfig],
-                          initialBalances: Map[Account, Double]) = {
+                          portfolio: Portfolio,
+                          loader: SessionLoader) = Future.successful {
     params = Some(paramsJson.as[Props].right.get)
     s"${params.get.exchange}/${params.get.product}/book_10" :: Nil
   }

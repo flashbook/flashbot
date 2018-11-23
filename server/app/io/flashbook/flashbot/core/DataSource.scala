@@ -19,7 +19,7 @@ abstract class DataSource(topics: Map[String, Json],
                      mat: ActorMaterializer): Future[Set[String]] =
     Future.successful(Set.empty)
 
-  def typeProvider(dataType: String): DeltaFmt[_]
+  def types: Map[String, DeltaFmt[_]] = Map.empty
 
   def scheduleIngest(topics: Set[String], dataType: String): IngestSchedule =
     IngestOne(topics.head, 0 seconds)
@@ -60,26 +60,14 @@ object DataSource {
     case srcKey :: topic :: dataType :: Nil => Address(srcKey, topic, dataType)
   }
 
-  sealed trait BuiltInType[T] {
-    def fmt: DeltaFmt[T]
-  }
-  case object FullBook extends BuiltInType[FullBook.type] {
-    override def fmt: DeltaFmt[FullBook.type] = ???
-  }
-  case class DepthBook(depth: Int) extends BuiltInType[DepthBook] {
-    override def fmt: DeltaFmt[DepthBook] = ???
-  }
-  case object Trades extends BuiltInType[Trades.type] {
-    override def fmt = ???
-  }
-  case object Tickers extends BuiltInType[Tickers.type] {
-    override def fmt = ???
-  }
-  case class Candles(duration: FiniteDuration) extends BuiltInType[Candles] {
-    override def fmt = ???
-  }
+  sealed trait BuiltInType
+  case object FullBook extends BuiltInType
+  case class DepthBook(depth: Int) extends BuiltInType
+  case object Trades extends BuiltInType
+  case object Tickers extends BuiltInType
+  case class Candles(duration: FiniteDuration) extends BuiltInType
 
-  def parseBuiltInDataType(ty: String): Option[BuiltInType[_]] = ty.split("_").toList match {
+  def parseBuiltInDataType(ty: String): Option[BuiltInType] = ty.split("_").toList match {
     case "book" :: Nil => Some(FullBook)
     case "book" :: d :: Nil if d matches "[0-9]+" => Some(DepthBook(d.toInt))
     case "candles" :: d :: Nil => Some(Candles(parseDuration(d)))
@@ -87,5 +75,7 @@ object DataSource {
     case "tickers" :: Nil => Some(Tickers)
     case _ => None
   }
+
+  case class Bundle(id: Long, fromMicros: Long, toMicros: Long)
 }
 

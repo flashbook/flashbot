@@ -53,11 +53,11 @@ object TimeLog {
   }
 
   def apply[T <: Timestamped](path: File): TimeLog[T] = TimeLog[T](path, 30 days)
-  def apply[T <: Timestamped](path: File, duration: Duration): TimeLog[T] =
-    TimeLog[T](path, duration, RollCycles.DAILY)
-  def apply[T <: Timestamped](path: File, duration: Duration,
+  def apply[T <: Timestamped](path: File, retention: Duration): TimeLog[T] =
+    TimeLog[T](path, retention, RollCycles.DAILY)
+  def apply[T <: Timestamped](path: File, retention: Duration,
                               rollCycle: RollCycle): TimeLog[T] =
-    new TimeLog[T](path, duration, rollCycle)
+    new TimeLog[T](path, retention, rollCycle)
 
   class TimeLog[T <: Timestamped](path: File,
                                   retention: Duration,
@@ -147,9 +147,7 @@ object TimeLog {
           return true
         }
 
-        val tmpNext = reader.read(tailer, pauser)
-          .map(decode[T])
-          .map(_.right.get)
+        val tmpNext = reader.read(tailer, pauser).map(decode[T](_).right.get)
         if (tmpNext.isDefined && shouldContinue(tmpNext.get)) {
           _next = tmpNext
         } else {
@@ -189,13 +187,22 @@ object TimeLog {
         if (duration == ScanDuration.Finite) NoPollingReader else PollingReader
       )(onComplete)
 
-//    private def _scan(handler: T => Boolean, tailer: ExcerptTailer, reader: NextMsgReader)
-//                     (implicit de: Decoder[T]): Unit = {
-//      var msg: Option[String] = reader.read(tailer, pauser)
-//      while (msg.isDefined) {
-//        msg = if (handler(decode(msg.get).right.get)) reader.read(tailer, pauser) else None
-//      }
-//    }
+    def first(implicit de: Decoder[T]): Option[T] =
+      Option(queue.createTailer().toStart.readText()).map(decode[T](_).right.get)
+
+    def last(implicit de: Decoder[T]): Option[T] =
+      Option(queue.createTailer().direction(TailerDirection.BACKWARD).toEnd.readText())
+        .map(decode[T](_).right.get)
+
+    def find[U](key: U, comparing: T => U)
+               (implicit de: Decoder[T],
+                ordering: Ordering[U]): Option[T] = {
+      val tailer = _search(queue.createTailer(), comparing, key)
+      Option(tailer.readText()).map(decode[T](_).right.get) match {
+        case Some(found) if comparing(found) == key => Some(found)
+        case _ => None
+      }
+    }
 
     def close(): Unit = {
       queue.close()

@@ -3,6 +3,7 @@ package io.flashbook.flashbot.sources
 import java.io.File
 import java.util.concurrent.Executors
 
+import akka.NotUsed
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest}
@@ -25,7 +26,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
-class CryptopiaDataSource extends DataSource {
+class CryptopiaDataSource(topics: Map[String, Json],
+                          dataTypes: Map[String, DataTypeConfig])
+    extends DataSource(topics, dataTypes) {
 
   val SRC = "cryptopia"
   val BOOK_DEPTH = 10
@@ -70,7 +73,7 @@ class CryptopiaDataSource extends DataSource {
   }
 
   override def discoverTopics(implicit sys: ActorSystem,
-                              mat: ActorMaterializer): Set[String] = {
+                              mat: ActorMaterializer): Future[Set[String]] = {
 
     val markets = Await.result(Http().singleRequest(HttpRequest(
       method = HttpMethods.GET,
@@ -99,44 +102,46 @@ class CryptopiaDataSource extends DataSource {
       .filter(markets isDefinedAt _.Label)
       .filter(m => markets(m.Label).Volume > 0)
       .map(_.Label).toSet
+
+    ???
   }
 
-  override def ingestGroup(dataDir: String,
-                           topics: Map[String, Json],
-                           dataTypes: Map[String, DataSource.DataTypeConfig])
-                          (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+  override def ingestGroup(topics: Set[String], dataType: String)
+                          (implicit sys: ActorSystem,
+                           mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]] = {
 
-    val newTopics = topics.toSeq.flatMap {
-      case ("*", value) => discoverTopics.toSeq.map((_, value))
-      case kv => Seq(kv)
-    }.toMap
-
-    // Load trade pairs
-    val tradePairs = Await.result(Http().singleRequest(HttpRequest(
-      method = HttpMethods.GET,
-      uri = "https://www.cryptopia.co.nz/api/GetTradePairs"
-    )).flatMap(rsp =>
-      Unmarshal(rsp.entity).to[CryptopiaResponse[Seq[TradePair]]]
-    ), 5 seconds).Data
-      .filter(_.Status == "OK")
-      .filter(newTopics contains _.Label.toLowerCase.replaceAll("/", "_"))
-      .groupBy(_.BaseSymbol)
-      // Batches of 5
-      .mapValues(_.grouped(5).toSeq)
-
-    val bookStream = Source
-      .actorRef(Int.MaxValue, OverflowStrategy.fail)
-      .via(Flow[(Orders, Long)].map(a => ordersToAggBookMD(a._1, a._2)))
-      .groupBy(10000, _.product)
-      .via(util.stream.initResource(md =>
-        timeLog[AggBookMD](dataDir, md.product, md.dataType)))
-      .to(Sink.foreach {
-        case (timeLog, book) =>
-          timeLog.enqueue(book)
-      })
-      .run
-
-    sys.actorOf(Props(new OrderFetchService(tradePairs, bookStream)))
+//    val newTopics = topics.toSeq.flatMap {
+//      case ("*", value) => discoverTopics.toSeq.map((_, value))
+//      case kv => Seq(kv)
+//    }.toMap
+//
+//    // Load trade pairs
+//    val tradePairs = Await.result(Http().singleRequest(HttpRequest(
+//      method = HttpMethods.GET,
+//      uri = "https://www.cryptopia.co.nz/api/GetTradePairs"
+//    )).flatMap(rsp =>
+//      Unmarshal(rsp.entity).to[CryptopiaResponse[Seq[TradePair]]]
+//    ), 5 seconds).Data
+//      .filter(_.Status == "OK")
+//      .filter(newTopics contains _.Label.toLowerCase.replaceAll("/", "_"))
+//      .groupBy(_.BaseSymbol)
+//      // Batches of 5
+//      .mapValues(_.grouped(5).toSeq)
+//
+//    val bookStream = Source
+//      .actorRef(Int.MaxValue, OverflowStrategy.fail)
+//      .via(Flow[(Orders, Long)].map(a => ordersToAggBookMD(a._1, a._2)))
+//      .groupBy(10000, _.product)
+//      .via(util.stream.initResource(md =>
+//        timeLog[AggBookMD](dataDir, md.product, md.dataType)))
+//      .to(Sink.foreach {
+//        case (timeLog, book) =>
+//          timeLog.enqueue(book)
+//      })
+//      .run
+//
+//    sys.actorOf(Props(new OrderFetchService(tradePairs, bookStream)))
+    ???
   }
 
   private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
@@ -219,4 +224,6 @@ class CryptopiaDataSource extends DataSource {
                              BaseVolume: Double,
                              BuyBaseVolume: Double,
                              SellBaseVolume: Double)
+
+  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 }

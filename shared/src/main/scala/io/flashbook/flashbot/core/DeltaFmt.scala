@@ -27,8 +27,6 @@ trait DeltaFmt[M] <: FoldFmt[M] {
   def fmtName: String
   def incUpdate(model: M, delta: D): M
   def incDiff(current: M, prev: M): Seq[D]
-  def modelEn: Encoder[M]
-  def modelDe: Decoder[M]
   def deltaEn: Encoder[D]
   def deltaDe: Decoder[D]
 
@@ -80,5 +78,7 @@ object DeltaFmt {
   // now this works.
   val formats = varFmtSet.foldLeft(Map.empty[String, DeltaFmt[_]])((memo, item) =>
     memo + (item.fmtName -> item))
+
+  def apply[T: DeltaFmt]: DeltaFmt[T] = implicitly[DeltaFmt[T]]
 }
 

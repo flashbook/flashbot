@@ -74,21 +74,22 @@ class DataSourceActor(config: DataSourceConfig) extends Actor {
       }
   }
 
-  def ingestTopics(topics: Either[String, Set[String]], dataType: String, delay: Duration) = Future {
-    Thread.sleep(delay.toMillis)
-    topics match {
-      case Left(t) =>
-        handleIngestStream(dataType, dataSource.ingest(t, dataType))
-      case Right(ts) =>
-        dataSource.ingestGroup(ts, dataType).foreach {
-          case (dt, src) => handleIngestStream(dt, src)
-        }
-    }
-  }
+  def ingestTopics(topics: Either[String, Set[String]], dataType: String, delay: Duration): Future[Unit] = ???
+
+//  def ingestTopics(topics: Either[String, Set[String]], dataType: String, delay: Duration) = Future {
+//    Thread.sleep(delay.toMillis)
+//    topics match {
+//      case Left(t) =>
+//        handleIngestStream(dataType, dataSource.ingest(t, dataType))
+//      case Right(ts) =>
+//        dataSource.ingestGroup(ts, dataType).foreach {
+//          case (dt, src) => handleIngestStream(dt, src)
+//        }
+//    }
+//  }
 
   /**
-    * We got a stream of T from the data source, and we need to save it to a time log in a format
-    * that makes it possible for us to efficiently index the log via binary search.
+    * We got a stream of T from the data source, and we need to save it to an [[IndexedDeltaLog]].
     */
   def handleIngestStream[T](dataType: String, fmt: DeltaFmt[T], src: Source[T, NotUsed]) = {
 

@@ -16,7 +16,7 @@ class IngestService extends Actor with ActorLogging {
         topicsWhitelist.isEmpty || topicsWhitelist.contains(key))
       val finalDataTypes = config.data_types.filterKeys(key =>
         dataTypesWhitelist.isEmpty || dataTypesWhitelist.contains(key))
-      Class.forName(config.`class`).newInstance.asInstanceOf[DataSource]
-        .ingestGroup(dataDir, finalTopics, finalDataTypes)
+//      Class.forName(config.`class`).newInstance.asInstanceOf[DataSource]
+//        .ingestGroup(dataDir, finalTopics, finalDataTypes)
   }
 }

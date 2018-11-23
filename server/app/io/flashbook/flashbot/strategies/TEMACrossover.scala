@@ -3,9 +3,12 @@ package io.flashbook.flashbot.strategies
 import io.flashbook.flashbot.core._
 import io.circe.Json
 import io.circe.generic.auto._
+import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.TradingSession
 import org.ta4j.core.indicators.TripleEMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
+
+import scala.concurrent.Future
 
 /**
   * Similar to the DualMovingAverageCrossover strategy, except it uses Triple EMA indicators
@@ -24,7 +27,7 @@ class TEMACrossover extends Strategy {
 
   var ts: Option[TimeSeriesGroup] = None
   var params: Option[Params] = None
-  def product = Pair(params.get.market)
+  def product = CurrencyPair(params.get.market)
 
   // Indicators
   lazy val close = new ClosePriceIndicator(ts.get.get(params.get.exchange, product).get)
@@ -32,8 +35,8 @@ class TEMACrossover extends Strategy {
   lazy val longTEMA = new TripleEMAIndicator(close, params.get.long)
 
   override def initialize(paramsJson: Json,
-                          dataSourceConfig: Map[String, DataSource.DataSourceConfig],
-                          initialBalances: Map[Account, Double]): List[String] = {
+                          portfolio: Portfolio,
+                          loader: SessionLoader): Future[Seq[String]] = Future.successful {
     params = Some(paramsJson.as[Params].right.get)
     ts = Some(new TimeSeriesGroup(params.get.bar_size))
     s"${params.get.exchange}/${params.get.market}/trades" :: Nil

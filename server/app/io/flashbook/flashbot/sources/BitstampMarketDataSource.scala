@@ -2,6 +2,7 @@ package io.flashbook.flashbot.sources
 
 import java.io.File
 
+import akka.NotUsed
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest}
@@ -15,7 +16,7 @@ import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD, fromOrderBook}
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
 import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.DataSource.{DepthBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.core.DataSource.{DataTypeConfig, DepthBook, Trades, parseBuiltInDataType}
 import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.optics.JsonPath._
@@ -276,77 +277,80 @@ object BitstampMarketDataSource {
   }
 }
 
-class BitstampMarketDataSource extends DataSource {
+class BitstampMarketDataSource(topics: Map[String, Json],
+                               dataTypes: Map[String, DataTypeConfig])
+    extends DataSource(topics, dataTypes) {
+
   import BitstampMarketDataSource._
 
-  override def ingestGroup(dataDir: String,
-                           topics: Map[String, Json],
-                           dataTypes: Map[String, DataSource.DataTypeConfig])
-                          (implicit sys: ActorSystem, mat: ActorMaterializer): Unit = {
+  override def ingestGroup(topics: Set[String], dataType: String)
+                          (implicit sys: ActorSystem,
+                           mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]] = {
 
-    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
-
-    val pusher = new Pusher("de504dc5763aeef9ff52")
-
-    pusher.connect(new ConnectionEventListener {
-      override def onConnectionStateChange(change: ConnectionStateChange): Unit = {
-        println("Connection state changed", change.getPreviousState, change.getCurrentState)
-      }
-
-      override def onError(message: String, code: String, e: Exception): Unit = {
-        println("ERROR", message, code, e)
-        throw e
-      }
-    })
-
-    dts.foreach {
-      case (DepthBook(depth), config) =>
-        val bookRef = Source
-          .actorRef[OrderBookMD[BitstampBookEvent]](Int.MaxValue, OverflowStrategy.fail)
-          .groupBy(1000, _.topic)
-
-          // Aggregate books to 10 price levels.
-          .map(_.toAggBookMD(depth))
-
-          // De-dupe the books after aggregation.
-          .via(util.stream.deDupeBy(_.data))
-
-          // Create time log to write market data to.
-          .via(util.stream.initResource(md =>
-            timeLog[AggBookMD](dataDir, md.product, md.dataType)))
-
-          // Persist
-          .to(Sink.foreach {
-            case (aggBookLog, md) =>
-              aggBookLog.enqueue(md)
-          })
-          .run
-
-        // Create an order book provider for each product.
-        topics.keySet.foreach(pair => {
-          sys.actorOf(
-            Props(new BitstampOrderBookProvider(pair, pusher, bookRef)),
-            s"bitstamp-order-book-provider-$pair")
-        })
-
-      case (Trades, config) =>
-        val tradesRef = Source
-          .actorRef[TradeMD](Int.MaxValue, OverflowStrategy.fail)
-          .groupBy(1000, _.topic)
-          .via(util.stream.initResource(md =>
-            timeLog[TradeMD](dataDir, md.product, md.dataType)))
-          .to(Sink.foreach {
-            case (tradeLog, md) =>
-              tradeLog.enqueue(md)
-          })
-          .run
-
-        topics.keySet.foreach(pair => {
-          sys.actorOf(
-            Props(new BitstampTradesProvider(pair, pusher, tradesRef)),
-            s"bitstamp-trades-provider-$pair")
-        })
-    }
+//    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
+//
+//    val pusher = new Pusher("de504dc5763aeef9ff52")
+//
+//    pusher.connect(new ConnectionEventListener {
+//      override def onConnectionStateChange(change: ConnectionStateChange): Unit = {
+//        println("Connection state changed", change.getPreviousState, change.getCurrentState)
+//      }
+//
+//      override def onError(message: String, code: String, e: Exception): Unit = {
+//        println("ERROR", message, code, e)
+//        throw e
+//      }
+//    })
+//
+//    dts.foreach {
+//      case (DepthBook(depth), config) =>
+//        val bookRef = Source
+//          .actorRef[OrderBookMD[BitstampBookEvent]](Int.MaxValue, OverflowStrategy.fail)
+//          .groupBy(1000, _.topic)
+//
+//          // Aggregate books to 10 price levels.
+//          .map(_.toAggBookMD(depth))
+//
+//          // De-dupe the books after aggregation.
+//          .via(util.stream.deDupeBy(_.data))
+//
+//          // Create time log to write market data to.
+//          .via(util.stream.initResource(md =>
+//            timeLog[AggBookMD](dataDir, md.product, md.dataType)))
+//
+//          // Persist
+//          .to(Sink.foreach {
+//            case (aggBookLog, md) =>
+//              aggBookLog.enqueue(md)
+//          })
+//          .run
+//
+//        // Create an order book provider for each product.
+//        topics.keySet.foreach(pair => {
+//          sys.actorOf(
+//            Props(new BitstampOrderBookProvider(pair, pusher, bookRef)),
+//            s"bitstamp-order-book-provider-$pair")
+//        })
+//
+//      case (Trades, config) =>
+//        val tradesRef = Source
+//          .actorRef[TradeMD](Int.MaxValue, OverflowStrategy.fail)
+//          .groupBy(1000, _.topic)
+//          .via(util.stream.initResource(md =>
+//            timeLog[TradeMD](dataDir, md.product, md.dataType)))
+//          .to(Sink.foreach {
+//            case (tradeLog, md) =>
+//              tradeLog.enqueue(md)
+//          })
+//          .run
+//
+//        topics.keySet.foreach(pair => {
+//          sys.actorOf(
+//            Props(new BitstampTradesProvider(pair, pusher, tradesRef)),
+//            s"bitstamp-trades-provider-$pair")
+//        })
+//    }
+    ???
   }
 
   private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
@@ -379,4 +383,6 @@ class BitstampMarketDataSource extends DataSource {
       }
     }
   }
+
+  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 }

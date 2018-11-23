@@ -30,38 +30,39 @@ import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
-class BinanceMarketDataSource extends DataSource {
+class BinanceMarketDataSource(topics: Map[String, Json],
+                              dataTypes: Map[String, DataTypeConfig])
+    extends DataSource(topics, dataTypes) {
 
   val SRC = "binance"
   val BOOK_DEPTH = 100
   val MAX_PRODUCTS = 10000
   val SNAPSHOT_INTERVAL = 10000
 
-  override def ingestGroup(dataDir: String,
-                           topics: Map[String, Json],
-                           dataTypes: Map[String, DataSource.DataTypeConfig])
+  override def ingestGroup(topics: Set[String], dataType: String)
                           (implicit system: ActorSystem,
-                      mat: ActorMaterializer): Unit = {
-    implicit val ec: ExecutionContext =
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
-
-    val tickerDataType = dataTypes.filterKeys(_ == "tickers")
-    val otherDataTypes = dataTypes.filterKeys(_ != "tickers")
-
-    // We're using the "!ticker@arr" stream, which includes all symbols, for tickers. So we don't
-    // need to batch for the "tickers" data type.
-    if (tickerDataType.nonEmpty) {
-      ingestPart(dataDir, topics, tickerDataType, 0)
-    }
-
-    // Since we may be requesting data for hundreds of Binance symbols, we partition the
-    // topics (symbols) into parts and start them in stages. This will avoid rate limits.
-    topics.grouped(20).zipWithIndex.foreach { case (part, i) =>
-      Future {
-        Thread.sleep(1000 * 60 * i)
-        ingestPart(dataDir, part, otherDataTypes, i)
-      }
-    }
+                           mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]] = {
+//    implicit val ec: ExecutionContext =
+//      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(100))
+//
+//    val tickerDataType = dataTypes.filterKeys(_ == "tickers")
+//    val otherDataTypes = dataTypes.filterKeys(_ != "tickers")
+//
+//    // We're using the "!ticker@arr" stream, which includes all symbols, for tickers. So we don't
+//    // need to batch for the "tickers" data type.
+//    if (tickerDataType.nonEmpty) {
+//      ingestPart(dataDir, topics, tickerDataType, 0)
+//    }
+//
+//    // Since we may be requesting data for hundreds of Binance symbols, we partition the
+//    // topics (symbols) into parts and start them in stages. This will avoid rate limits.
+//    topics.grouped(20).zipWithIndex.foreach { case (part, i) =>
+//      Future {
+//        Thread.sleep(1000 * 60 * i)
+//        ingestPart(dataDir, part, otherDataTypes, i)
+//      }
+//    }
+    ???
   }
 
   def ingestPart(dataDir: String,
@@ -578,4 +579,6 @@ class BinanceMarketDataSource extends DataSource {
       memo.updateLevel(Ask, parsePricePoint(point)._1, parsePricePoint(point)._2))
     bidsAndAsks
   }
+
+  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 }

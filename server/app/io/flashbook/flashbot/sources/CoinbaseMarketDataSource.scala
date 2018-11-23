@@ -18,7 +18,7 @@ import io.flashbook.flashbot.engine.OrderBookProvider.Subscribe
 import io.flashbook.flashbot.engine.TimeLog.TimeLog
 import io.circe.Json
 import io.circe.generic.auto._
-import io.flashbook.flashbot.core.DataSource.{DepthBook, FullBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.core.DataSource._
 import io.flashbook.flashbot.core.Instrument.CurrencyPair
 import io.flashbook.flashbot.engine.{OrderBookProvider, TimeLog}
 import io.flashbook.flashbot.util.time.TimeFmt
@@ -29,70 +29,71 @@ import org.java_websocket.handshake.ServerHandshake
 import scala.collection.immutable.{Queue, SortedSet}
 import scala.concurrent.Future
 
-class CoinbaseMarketDataSource extends DataSource {
+class CoinbaseMarketDataSource(topics: Map[String, Json],
+                               dataTypes: Map[String, DataTypeConfig])
+    extends DataSource(topics, dataTypes) {
 
   // Save an order book snapshot every 1M events per product
   val snapshotInterval = 1000000
 
   val NAME = "coinbase"
 
-  override def ingestGroup(dataDir: String,
-                           topics: Map[String, Json],
-                           dataTypes: Map[String, DataSource.DataTypeConfig])
+  override def ingestGroup(topics: Set[String], dataType: String)
                           (implicit system: ActorSystem,
-                      mat: ActorMaterializer): Unit = {
+                           mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]] = {
 
-    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
-    val fullStream = Source
-      .actorRef[OrderBookMD[APIOrderEvent]](Int.MaxValue, OverflowStrategy.fail)
-      .groupBy(1000, _.product)
-      .scan[(Option[(TimeLog[APIOrderEvent], TimeLog[SnapshotItem],
-                      TimeLog[TradeMD])],
-            Long, Option[OrderBookMD[APIOrderEvent]])]((None, -1, None)) {
-        case ((queueOpt, count, prev), book) =>
-          (Some(queueOpt.getOrElse((
-            timeLog[APIOrderEvent](dataDir, book.product, "book/events"),
-            timeLog[SnapshotItem](dataDir, book.product, "book/snapshots"),
-            timeLog[TradeMD](dataDir, book.product, book.dataType)))),
-          count + 1,
-          Some(book))
-      }
-      .to(Sink.foreach {
-        case (Some((eventsQueue, snapshotsQueue, tradesQueue)), count,
-                Some(md @ OrderBookMD(_, _, _, Some(rawEvent: APIOrderEvent), _))) =>
-
-          // Persist the full order book stream
-          if (dts.isDefinedAt(FullBook)) {
-            // Save events to disk
-            eventsQueue.enqueue(rawEvent)
-            // And periodic snapshots too
-            if (count % snapshotInterval == 0) {
-              var itemCount = 1
-              val snapshotOrders = md.getSnapshot
-              snapshotOrders.foreach { order =>
-                snapshotsQueue.enqueue(SnapshotItem(order, md.micros, itemCount,
-                  snapshotOrders.size))
-                itemCount = itemCount + 1
-              }
-            }
-          }
-
-          // Persist trades separately. Derived from the same order book stream.
-          if (dts.isDefinedAt(Trades)) {
-            rawEvent.toOrderEvent match {
-              case OrderMatch(tradeId, product, time, size, price, side, _, _) =>
-                tradesQueue.enqueue(TradeMD(NAME, product.toString,
-                  Trade(tradeId.toString, time, price, size, side match {
-                    case Buy => Sell
-                    case Sell => Buy
-                  })))
-              case _ =>
-            }
-          }
-      })
-      .run
-    system.actorOf(Props(new LiveGDAXMarketData(fullStream ! _))) !
-      Subscribe(topics.keySet)
+//    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
+//    val fullStream = Source
+//      .actorRef[OrderBookMD[APIOrderEvent]](Int.MaxValue, OverflowStrategy.fail)
+//      .groupBy(1000, _.product)
+//      .scan[(Option[(TimeLog[APIOrderEvent], TimeLog[SnapshotItem],
+//                      TimeLog[TradeMD])],
+//            Long, Option[OrderBookMD[APIOrderEvent]])]((None, -1, None)) {
+//        case ((queueOpt, count, prev), book) =>
+//          (Some(queueOpt.getOrElse((
+//            timeLog[APIOrderEvent](dataDir, book.product, "book/events"),
+//            timeLog[SnapshotItem](dataDir, book.product, "book/snapshots"),
+//            timeLog[TradeMD](dataDir, book.product, book.dataType)))),
+//          count + 1,
+//          Some(book))
+//      }
+//      .to(Sink.foreach {
+//        case (Some((eventsQueue, snapshotsQueue, tradesQueue)), count,
+//                Some(md @ OrderBookMD(_, _, _, Some(rawEvent: APIOrderEvent), _))) =>
+//
+//          // Persist the full order book stream
+//          if (dts.isDefinedAt(FullBook)) {
+//            // Save events to disk
+//            eventsQueue.enqueue(rawEvent)
+//            // And periodic snapshots too
+//            if (count % snapshotInterval == 0) {
+//              var itemCount = 1
+//              val snapshotOrders = md.getSnapshot
+//              snapshotOrders.foreach { order =>
+//                snapshotsQueue.enqueue(SnapshotItem(order, md.micros, itemCount,
+//                  snapshotOrders.size))
+//                itemCount = itemCount + 1
+//              }
+//            }
+//          }
+//
+//          // Persist trades separately. Derived from the same order book stream.
+//          if (dts.isDefinedAt(Trades)) {
+//            rawEvent.toOrderEvent match {
+//              case OrderMatch(tradeId, product, time, size, price, side, _, _) =>
+//                tradesQueue.enqueue(TradeMD(NAME, product.toString,
+//                  Trade(tradeId.toString, time, price, size, side match {
+//                    case Buy => Sell
+//                    case Sell => Buy
+//                  })))
+//              case _ =>
+//            }
+//          }
+//      })
+//      .run
+//    system.actorOf(Props(new LiveGDAXMarketData(fullStream ! _))) !
+//      Subscribe(topics.keySet)
+    ???
   }
 
   override def stream(dataDir: String, topic: String,
@@ -358,4 +359,6 @@ class CoinbaseMarketDataSource extends DataSource {
       old_funds.map(_.toDouble), last_size.map(_.toDouble), best_bid.map(_.toDouble),
       best_ask.map(_.toDouble), client_oid)
   }
+
+  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 }

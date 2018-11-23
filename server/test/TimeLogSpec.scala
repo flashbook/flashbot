@@ -1,9 +1,6 @@
 import java.io.File
 
-import io.circe._
 import io.circe.generic.auto._
-import io.circe.syntax._
-import io.circe.Printer._
 import io.flashbook.flashbot.core.Order.{Buy, Sell}
 import io.flashbook.flashbot.core.Trade
 import io.flashbook.flashbot.engine.TimeLog
@@ -70,6 +67,25 @@ class TimeLogSpec extends FlatSpec with Matchers {
     // Enqueue the final 60, now the first file should have deleted.
     another60.foreach(tl.enqueue(_))
     (firstTrade.micros > first30.last.micros) shouldBe true
+  }
+
+  "TimeLog" should "find an element with binary search" in {
+    val nowMillis = System.currentTimeMillis
+    val tl = TimeLog[Trade](testFolder, 24 hours, RollCycles.HOURLY)
+    val trades = genTrades(1000, nowMillis)
+    trades.foreach(tl.enqueue(_))
+
+    tl.find(0, _.id.toInt) shouldEqual trades.headOption
+
+    tl.find(999, _.id.toInt) shouldEqual trades.lastOption
+
+    tl.find(500, _.id.toInt) shouldEqual Some(trades(500))
+
+    tl.find(-1, _.id.toInt) shouldBe None
+
+    tl.find(1000, _.id.toInt) shouldBe None
+
+    tl.find(5000, _.id.toInt) shouldBe None
   }
 
   private def deleteFile(file: File) {
