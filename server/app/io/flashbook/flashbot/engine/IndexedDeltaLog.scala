@@ -5,9 +5,11 @@ import java.io.File
 import io.circe.{Decoder, Encoder, Json}
 import io.circe.generic.semiauto._
 import io.circe.syntax._
+import io.circe.parser._
 import io.flashbook.flashbot.core.DataSource.Bundle
 import io.flashbook.flashbot.core.{DeltaFmt, FoldFmt, Timestamped}
 import io.flashbook.flashbot.engine.IndexedDeltaLog._
+import io.flashbook.flashbot.engine.TimeLog.ScanDuration
 
 import scala.concurrent.duration._
 
@@ -68,7 +70,41 @@ class IndexedDeltaLog[T](path: File,
     lastData = Some(data)
   }
 
-//  def scan
+  def scan(fromMicros: Long, toMicros: Long, polling: Boolean = false): Iterator[(T, Long)] = {
+    // Find the slice of the first item.
+    val sliceOpt = timeLog.find(fromMicros, _.micros).map(_.sliceId)
+    if (sliceOpt.isEmpty) {
+      return Iterator.empty
+    }
+
+    // Scan from the first snapshot item of this slice until we reach an time log item that
+    // is after `toMicros`.
+    val wrapperIt = timeLog.scan[(SliceId, Option[SnapBound])](
+      (sliceOpt.get, Some(Start)),
+      b => (b.sliceId, b.matchBound(Start)),
+      _.micros <= toMicros,
+      if (polling) ScanDuration.Continuous else ScanDuration.Finite
+    )()(de, sliceBoundOrder)
+
+    // Map from an iterator of wrappers to an iterator of T.
+    val dataIt = wrapperIt.scanLeft[(Option[(T, Long)], Boolean)](None, false) {
+      case ((None, false), snap: BundleSnap) =>
+        (snap.snap.as[T].toOption.map((_, snap.micros)), snap.isEnd)
+      case ((Some(partial), false), snap: BundleSnap) =>
+        (snap.snap.as[T].toOption.map(item =>
+          (fmt.fold(partial._1, item), snap.micros)), snap.isEnd)
+      case ((dataOpt, true), delta: BundleDelta) =>
+        (dataOpt.map(d =>
+          (fmt.update(d._1, delta.delta.as[fmt.D].right.get), delta.micros)), true)
+    }
+
+    // Filter incomplete and out of bounds data and return.
+    dataIt.filter(_._2).collect {
+      case (Some(data), _) => data
+    }.filter(d => d._2 >= fromMicros && d._2 < toMicros)
+  }
+
+  def close() = timeLog.close()
 
   def index: Map[Long, Bundle] = {
     var idx = Map.empty[Long, Bundle]

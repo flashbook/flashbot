@@ -5,6 +5,7 @@ import org.scalatest._
 class IndexedDeltaLogSpec extends FlatSpec with Matchers {
 
   var testFolder: File = _
+  val nowMillis = 1543017219051L // A few minutes before midnight
 
   "IndexedDeltaLogSpec" should "work" in {
     val file = new File(testFolder.getAbsolutePath + "/trades")
