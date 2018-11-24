@@ -57,7 +57,7 @@ case class Report(strategy: String,
                            values: ValuesMap): ValuesMap = {
     val dv = delta.asInstanceOf[fmt.D]
     val v = values(key).asInstanceOf[T]
-    val newVal = fmt.incUpdate(v, dv)
+    val newVal = fmt.update(v, dv)
     values + (key -> ReportValue(fmt.fmtName, newVal))
   }
 

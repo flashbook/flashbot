@@ -96,12 +96,12 @@ class BinanceMarketDataSource(topics: Map[String, Json],
         case (index, ((eventsLog, snapshotsLog), (book, event))) =>
 
           // Always save the event
-          eventsLog.enqueue(event)
+          eventsLog.save(event)
 //          println("saving event", event)
 
           // Occasionally save the full state as a snapshot
           if (index % SNAPSHOT_INTERVAL == 0) {
-            snapshotsLog.enqueue(AggSnapshot(event.u, book))
+            snapshotsLog.save(AggSnapshot(event.u, book))
 //            println("saving snapshot", AggSnapshot(event.u, book))
           }
       }).run
@@ -149,7 +149,7 @@ class BinanceMarketDataSource(topics: Map[String, Json],
       .to(Sink.foreach {
         case (timeLog, md) =>
 //          println(md.topic, md.dataType, md.micros)
-          timeLog.enqueue(md)
+          timeLog.save(md)
       }).run
 
     val tickersStream = Source
@@ -164,7 +164,7 @@ class BinanceMarketDataSource(topics: Map[String, Json],
       }
       .to(Sink.foreach {
         case (timeLog, md) =>
-          timeLog.enqueue(md)
+          timeLog.save(md)
       }).run
 
     dataTypes

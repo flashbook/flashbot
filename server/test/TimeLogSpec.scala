@@ -13,6 +13,7 @@ import scala.concurrent.duration._
 class TimeLogSpec extends FlatSpec with Matchers {
 
   var testFolder: File = _
+  val nowMillis = 1543017219051L // A few minutes before midnight
 
   // One trade every minute
   def genTrades(n: Int, nowMillis: Long): Seq[Trade] = Seq.range(0, n).map(i =>
@@ -21,10 +22,9 @@ class TimeLogSpec extends FlatSpec with Matchers {
 
   "TimeLog" should "write and read a single item to a new queue" in {
     val file = new File(testFolder.getAbsolutePath + "/trades")
-    val nowMillis = System.currentTimeMillis
     val trades = genTrades(1, nowMillis)
     val tl = TimeLog[Trade](testFolder)
-    trades.foreach(trade => tl.enqueue(trade))
+    trades.foreach(trade => tl.save(trade))
     var read = Seq.empty[Trade]
     var doneFired = false
 
@@ -45,35 +45,37 @@ class TimeLogSpec extends FlatSpec with Matchers {
     doneFired shouldBe true
   }
 
+  /**
+    * <------|--------|----------------|-------------------------|--------|----------------|---->
+    *        0     midnight            30                        60      cycle             90
+    */
   "TimeLog" should "clean up files for a 1 hour retention period" in {
     val file = new File(testFolder.getAbsolutePath + "/trades")
-    val nowMillis = System.currentTimeMillis
     val tl = TimeLog[Trade](testFolder, 1 hour, RollCycles.HOURLY)
     val (first30, after30) = genTrades(1000, nowMillis).splitAt(30)
-    val (next60, after90) = after30.splitAt(60)
-    val (another60, after150) = after90.splitAt(60)
+    val (next30, after60) = after30.splitAt(30)
 
     def firstTrade: Trade =
       tl.scan[Long](0, _.micros, _ => true, ScanDuration.Finite)().toSeq.head
 
     // Enqueue first 30, there should be no deletions yet.
-    first30.foreach(tl.enqueue(_))
+    first30.foreach(tl.save(_))
     firstTrade shouldEqual first30.head
 
-    // Enqueue next 60, still no deletions.
-    next60.foreach(tl.enqueue(_))
+    // Enqueue next 30, still no deletions.
+    next30.foreach(tl.save(_))
     firstTrade shouldEqual first30.head
 
-    // Enqueue the final 60, now the first file should have deleted.
-    another60.foreach(tl.enqueue(_))
-    (firstTrade.micros > first30.last.micros) shouldBe true
+    // Enqueue another 30, should delete first file.
+    after60.take(30).foreach(tl.save(_))
+    (firstTrade.micros > first30.head.micros) shouldBe true
+    (firstTrade.micros < next30.head.micros) shouldBe true
   }
 
   "TimeLog" should "find an element with binary search" in {
-    val nowMillis = System.currentTimeMillis
     val tl = TimeLog[Trade](testFolder, 24 hours, RollCycles.HOURLY)
     val trades = genTrades(1000, nowMillis)
-    trades.foreach(tl.enqueue(_))
+    trades.foreach(tl.save(_))
 
     tl.find(0, _.id.toInt) shouldEqual trades.headOption
 
@@ -86,6 +88,24 @@ class TimeLogSpec extends FlatSpec with Matchers {
     tl.find(1000, _.id.toInt) shouldBe None
 
     tl.find(5000, _.id.toInt) shouldBe None
+  }
+
+  "TimeLog" should "scan elements within a time range" in {
+    val tl = TimeLog[Trade](testFolder, 24 hours, RollCycles.HOURLY)
+    val trades = genTrades(1000, nowMillis)
+    trades.foreach(tl.save(_))
+
+    // All items
+    tl.scan(0L, _.micros, _ => true, ScanDuration.Finite)().toSeq shouldEqual trades
+    tl.scan(nowMillis * 1000, _.micros, _ => true, ScanDuration.Finite)().toSeq shouldEqual trades
+
+    // All but first
+    tl.scan(nowMillis * 1000 + 1, _.micros, _ => true,
+      ScanDuration.Finite)().toSeq shouldEqual trades.tail
+
+    // All but first and last
+    tl.scan(nowMillis * 1000 + 1, _.micros, _.micros < trades.last.micros,
+      ScanDuration.Finite)().toSeq shouldEqual trades.tail.reverse.tail.reverse
   }
 
   private def deleteFile(file: File) {

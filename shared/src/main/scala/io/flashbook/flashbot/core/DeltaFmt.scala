@@ -25,8 +25,8 @@ import io.circe.{Decoder, Encoder}
 trait DeltaFmt[M] <: FoldFmt[M] {
   type D
   def fmtName: String
-  def incUpdate(model: M, delta: D): M
-  def incDiff(current: M, prev: M): Seq[D]
+  def update(model: M, delta: D): M
+  def diff(prev: M, current: M): Seq[D]
   def deltaEn: Encoder[D]
   def deltaDe: Decoder[D]
 
@@ -51,8 +51,8 @@ object DeltaFmt {
                     de: Decoder[M]): DeltaFmt[M] = new DeltaFmt[M] {
     override type D = M
     override def fmtName: String = name
-    override def incUpdate(model: M, delta: D): M = delta
-    override def incDiff(current: M, prev: M): Seq[D] = Seq(current)
+    override def update(model: M, delta: D): M = delta
+    override def diff(current: M, prev: M): Seq[D] = Seq(current)
     override def modelEn: Encoder[M] = en
     override def modelDe: Decoder[M] = de
     override def deltaEn: Encoder[D] = en

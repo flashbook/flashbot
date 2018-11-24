@@ -2,10 +2,11 @@ package io.flashbook.flashbot.engine
 
 import java.io.File
 
-import io.circe.{Decoder, Json}
+import io.circe.{Decoder, Encoder, Json}
 import io.circe.generic.semiauto._
+import io.circe.syntax._
 import io.flashbook.flashbot.core.DataSource.Bundle
-import io.flashbook.flashbot.core.{DeltaFmt, Timestamped}
+import io.flashbook.flashbot.core.{DeltaFmt, FoldFmt, Timestamped}
 import io.flashbook.flashbot.engine.IndexedDeltaLog._
 
 import scala.concurrent.duration._
@@ -20,14 +21,54 @@ class IndexedDeltaLog[T](path: File,
                          sliceSize: Duration)
                         (implicit fmt: DeltaFmt[T]) {
 
-  implicit val tDe: Decoder[T] = fmt.modelDe
+  implicit private val tDe: Decoder[T] = fmt.modelDe
+  implicit private val tEn: Encoder[T] = fmt.modelEn
+  implicit private val dDe: Decoder[fmt.D] = fmt.deltaDe
+  implicit private val dEn: Encoder[fmt.D] = fmt.deltaEn
   implicit val de: Decoder[BundleWrapper] = deriveDecoder
+  implicit val en: Encoder[BundleWrapper] = deriveEncoder
 
   val timeLog = TimeLog[BundleWrapper](path, retention)
-  val lastSeenMicros = timeLog.last.map(_.micros).getOrElse(-1)
+  val prevBundleLastItem = timeLog.last
+  val currentBundle = prevBundleLastItem.map(_.bundle).getOrElse(-1L) + 1
+  var currentSlice = -1
+  var lastSeenTime = prevBundleLastItem.map(_.micros).getOrElse(-1L)
+  var lastData: Option[T] = None
 
-  def enqueue(micros: Long, data: T) = {
+  def save(micros: Long, data: T): Unit = {
+    if (micros < lastSeenTime) {
+      throw new RuntimeException("IndexedDeltaLog does not support outdated data.")
+    }
+
+    var wrappers = Seq.empty[BundleWrapper]
+
+    // If it's time for a new slice, unfold the data and save snapshot.
+    // Also increment the current slice.
+    if (lastData.isEmpty || (micros - lastSeenTime) >= sliceSize.toMicros) {
+      currentSlice = currentSlice + 1
+      val unfolded = FoldFmt.unfoldData(data)
+      wrappers ++= unfolded.zipWithIndex.map { case (d, i) =>
+        BundleSnap(currentBundle, currentSlice, micros, i == 0, i == unfolded.size - 1,
+          Some(lastSeenTime), d.asJson)
+      }
+    }
+
+    // And now we generate and save a delta against the previous item in this bundle.
+    if (lastData.isDefined) {
+      val deltas = fmt.diff(lastData.get, data)
+      wrappers ++= deltas.map(delta =>
+        BundleDelta(currentBundle, currentSlice, micros, delta.asJson))
+    }
+
+    // Persist to time log
+    wrappers.foreach(timeLog.save(_))
+
+    // Update vars
+    lastSeenTime = micros
+    lastData = Some(data)
   }
+
+//  def scan
 
   def index: Map[Long, Bundle] = {
     var idx = Map.empty[Long, Bundle]
@@ -59,7 +100,7 @@ class IndexedDeltaLog[T](path: File,
       // and populate the index with its time.
       var endTime: Long = -1
       if (nextSliceItem.isDefined) {
-        endTime = nextSliceItem.get.lastSeenMicros
+        endTime = nextSliceItem.get.prevSliceEndMicros.get
       } else {
         val lastItem = timeLog.last.get
         if (lastItem.bundle != currentSliceHead.get.bundle) {
@@ -144,7 +185,7 @@ object IndexedDeltaLog {
     }
   }
   case class BundleSnap(bundle: Long, slice: Long, micros: Long, isStart: Boolean, isEnd: Boolean,
-                        lastSeenMicros: Long, snap: Json) extends BundleWrapper
+                        prevSliceEndMicros: Option[Long], snap: Json) extends BundleWrapper
   case class BundleDelta(bundle: Long, slice: Long, micros: Long,
                          delta: Json) extends BundleWrapper
 

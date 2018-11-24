@@ -94,7 +94,6 @@ object TimeLog {
       val currentCycle = rollCycle.current(TimestampProvider, queueBuilder.epoch)
       val cycleDiff = currentCycle - fileCycle
       val diff = cycleDiff * rollCycle.length
-      println(diff, retention.toMillis)
       diff > retention.toMillis
     }
 
@@ -105,7 +104,6 @@ object TimeLog {
       }
 
       override def onReleased(cycle: Int, thisFile: File) = {
-        println("File released", thisFile)
         for {
           allFiles <- Option(path.listFiles).toSeq
           file <- allFiles
@@ -125,7 +123,7 @@ object TimeLog {
 
     private val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
 
-    def enqueue(msg: T)(implicit en: Encoder[T]): Unit = {
+    def save(msg: T)(implicit en: Encoder[T]): Unit = {
       inFlightMessage = Some(msg)
       val appender: ExcerptAppender = queue.acquireAppender
       appender.writeText(printer.pretty(msg.asJson))
@@ -185,7 +183,7 @@ object TimeLog {
         _search(queue.createTailer(), comparing, from),
         shouldContinue,
         if (duration == ScanDuration.Finite) NoPollingReader else PollingReader
-      )(onComplete)
+      )(onComplete).filter(x => ordering.compare(comparing(x), from) >= 0)
 
     def first(implicit de: Decoder[T]): Option[T] =
       Option(queue.createTailer().toStart.readText()).map(decode[T](_).right.get)
