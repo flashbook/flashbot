@@ -6,8 +6,8 @@ import io.circe.{Decoder, Encoder}
   * A type class for event sourcing data that supports incremental updates. Rationale is that we
   * have some data types that are quite large and frequently updating. The data types themselves
   * usually handle this well on their own by providing efficient updater methods. However,
-  * streaming them over the network is still not accounted for. We need to need for formalize
-  * the incremental update model by using event sourcing.
+  * streaming them over the network is still not accounted for. We need to formalize the
+  * incremental update model by using event sourcing.
   *
   * Create a data type that represents a single self contained modification to the model. Ensure
   * that it's Json serializable, as well as the model type itself. The Delta data type should be
@@ -27,17 +27,13 @@ trait DeltaFmt[M] <: FoldFmt[M] {
   def fmtName: String
   def update(model: M, delta: D): M
   def diff(prev: M, current: M): Seq[D]
+}
+
+trait DeltaFmtJson[M] <: DeltaFmt[M] {
+  def modelEn: Encoder[M]
+  def modelDe: Decoder[M]
   def deltaEn: Encoder[D]
   def deltaDe: Decoder[D]
-
-//  def withValue[R](anyValue: Any)(fn: M => R): R = anyValue match {
-//    case value: M => fn(value)
-//  }
-
-//  def withValueAndDelta[R](anyValue: Any, anyDelta: Any)(fn: (M, D) => R): R =
-//    (anyValue, anyDelta) match {
-//      case (value: M, delta: D) => fn(value, delta)
-//  }
 }
 
 object DeltaFmt {
@@ -46,13 +42,13 @@ object DeltaFmt {
    * to be the same type as the model, and it tricks the persistence engine into actually saving
    * the updated model in full after doing a diff.
    */
-  def defaultFmt[M](name: String)
+  def defaultFmtJson[M](name: String)
                    (implicit en: Encoder[M],
-                    de: Decoder[M]): DeltaFmt[M] = new DeltaFmt[M] {
+                    de: Decoder[M]): DeltaFmtJson[M] = new DeltaFmtJson[M] {
     override type D = M
     override def fmtName: String = name
     override def update(model: M, delta: D): M = delta
-    override def diff(current: M, prev: M): Seq[D] = Seq(current)
+    override def diff(prev: M, current: M): Seq[D] = Seq(current)
     override def modelEn: Encoder[M] = en
     override def modelDe: Decoder[M] = de
     override def deltaEn: Encoder[D] = en
@@ -62,23 +58,44 @@ object DeltaFmt {
     override def unfold(x: M) = (x, None)
   }
 
-  implicit val intVarFmt: DeltaFmt[java.lang.Integer] = defaultFmt("int")
-  implicit val doubleVarFmt: DeltaFmt[java.lang.Double] = defaultFmt("double")
-  implicit val stringVarFmt: DeltaFmt[java.lang.String] = defaultFmt("string")
-  implicit val booleanVarFmt: DeltaFmt[java.lang.Boolean] = defaultFmt("boolean")
+  def default[M](name: String): DeltaFmt[M] = new DeltaFmt[M] {
+    override type D = M
+    override def fmtName: String = name
+    override def update(model: M, delta: D): M = delta
+    override def diff(prev: M, current: M): Seq[D] = Seq(current)
+    override def fold(x: M, y: M) = y
+    override def unfold(x: M) = (x, None)
+  }
 
-  val varFmtSet: Set[DeltaFmt[_]] = Set(
-    implicitly[DeltaFmt[java.lang.Integer]],
-    implicitly[DeltaFmt[java.lang.Double]],
-    implicitly[DeltaFmt[java.lang.String]],
-    implicitly[DeltaFmt[java.lang.Boolean]],
+  implicit val intVarFmt: DeltaFmtJson[java.lang.Integer] = defaultFmtJson("int")
+  implicit val doubleVarFmt: DeltaFmtJson[java.lang.Double] = defaultFmtJson("double")
+  implicit val stringVarFmt: DeltaFmtJson[java.lang.String] = defaultFmtJson("string")
+  implicit val booleanVarFmt: DeltaFmtJson[java.lang.Boolean] = defaultFmtJson("boolean")
+
+  val varFmtSet: Set[DeltaFmtJson[_]] = Set(
+    implicitly[DeltaFmtJson[java.lang.Integer]],
+    implicitly[DeltaFmtJson[java.lang.Double]],
+    implicitly[DeltaFmtJson[java.lang.String]],
+    implicitly[DeltaFmtJson[java.lang.Boolean]],
   )
 
-  // We need to have an index of VarFmt instances. It would be great to do without this, but for
-  // now this works.
-  val formats = varFmtSet.foldLeft(Map.empty[String, DeltaFmt[_]])((memo, item) =>
+  // We need to have an index of DeltaFmtJson instances. It would be great to do without this,
+  // but for now this works.
+  val formats = varFmtSet.foldLeft(Map.empty[String, DeltaFmtJson[_]])((memo, item) =>
     memo + (item.fmtName -> item))
 
-  def apply[T: DeltaFmt]: DeltaFmt[T] = implicitly[DeltaFmt[T]]
+  def apply[T: DeltaFmtJson]: DeltaFmtJson[T] = implicitly[DeltaFmtJson[T]]
+
+  implicit class FmtStringOps(str: String) {
+    def fmt: DeltaFmt[_] = DataType.parse(str) match {
+      case Some(dt) => dt.fmt
+      case None => formats(str)
+    }
+
+//    def fmtJson: DeltaFmtJson[_] = DataType.parse(str) match {
+//      case Some(dt) => dt.fmt
+//      case None => formats(str)
+//    }
+  }
 }
 

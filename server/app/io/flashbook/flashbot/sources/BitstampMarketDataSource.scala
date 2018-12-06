@@ -12,11 +12,10 @@ import akka.stream.scaladsl.{Sink, Source}
 import com.pusher.client.channel.{ChannelEventListener, SubscriptionEventListener}
 import com.pusher.client.connection.{ConnectionEventListener, ConnectionStateChange}
 import com.pusher.client.Pusher
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD, fromOrderBook}
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-import io.flashbook.flashbot.core.OrderBook.{OrderBookMD, SnapshotOrder}
+import io.flashbook.flashbot.core.OrderBook.SnapshotOrder
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.DataSource.{DataTypeConfig, DepthBook, Trades, parseBuiltInDataType}
+import io.flashbook.flashbot.core.DataSource.{DataTypeConfig, IngestSchedule}
 import io.flashbook.flashbot.util
 import io.circe.Json
 import io.circe.optics.JsonPath._
@@ -24,7 +23,7 @@ import io.circe.parser._
 import io.circe.generic.auto._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
 import io.flashbook.flashbot.core.Instrument.CurrencyPair
-import io.flashbook.flashbot.engine.TimeLog
+import io.flashbook.flashbot.core.Ladder
 
 import scala.collection.immutable.Queue
 import scala.concurrent.{ExecutionContext, Future}
@@ -171,8 +170,7 @@ object BitstampMarketDataSource {
       case event: BitstampBookEvent =>
         fuzzyBook = fuzzyBook.event(event.micros, event.toOrderEvent)
         if (snapCount > 5) {
-          bookReceiver ! OrderBookMD[BitstampBookEvent](NAME, event.product.toString,
-            event.micros, Some(event), fuzzyBook.orderBook)
+          bookReceiver ! (event.micros, fuzzyBook.orderBook)
         }
 
         if (!seenEvent) {
@@ -185,7 +183,6 @@ object BitstampMarketDataSource {
 
       case snapshot: BitstampBookSnapshot =>
         fuzzyBook = fuzzyBook.snapshot(snapshot.microtimestamp.toLong, snapshot.orderSet)
-
     }
   }
 
@@ -212,19 +209,19 @@ object BitstampMarketDataSource {
       }
     })
 
-    channel.bind("trade", new SubscriptionEventListener {
-      override def onEvent(channelName: String, eventName: String, data: String): Unit = {
-        println(data)
-        val json = parse(data).right.get
-        self ! TradeMD(NAME, pair.toString, Trade(
-          root.id.long.getOption(json).get.toString,
-          util.time.currentTimeMicros,
-          root.price_str.string.getOption(json).get.toDouble,
-          root.amount_str.string.getOption(json).get.toDouble,
-          if (root.`type`.int.getOption(json).get == 0) Buy else Sell
-        ))
-      }
-    })
+//    channel.bind("trade", new SubscriptionEventListener {
+//      override def onEvent(channelName: String, eventName: String, data: String): Unit = {
+//        println(data)
+//        val json = parse(data).right.get
+//        self ! TradeMD(NAME, pair.toString, Trade(
+//          root.id.long.getOption(json).get.toString,
+//          util.time.currentTimeMicros,
+//          root.price_str.string.getOption(json).get.toDouble,
+//          root.amount_str.string.getOption(json).get.toDouble,
+//          if (root.`type`.int.getOption(json).get == 0) Buy else Sell
+//        ))
+//      }
+//    })
 
     def requestBackfill(): Unit = {
       Future {
@@ -247,34 +244,35 @@ object BitstampMarketDataSource {
       requestBackfill()
     }
 
-    var tradeQueue: Option[Queue[TradeMD]] = Some(Queue.empty[TradeMD])
-    override def receive: Receive = {
-      case md: TradeMD =>
-        if (tradeQueue.isDefined) {
-          tradeQueue = tradeQueue.map(_.enqueue(md))
-        } else {
-          tradesReceiver ! md
-        }
+    override def receive = ???
 
-      case backfill: Seq[BitstampTX] =>
-        val backfillTrades = backfill.reverse.map {
-          case BitstampTX(date, tid, price, ty, amount) =>
-            TradeMD(NAME, pair.toString, Trade(
-              tid,
-              date.toLong * 1000000 + tid.toLong % 1000000,
-              price.toDouble,
-              amount.toDouble,
-              if (ty.toInt == 0) Buy else Sell
-            ))
-        }
-        backfillTrades.foreach(tradesReceiver ! _)
-
-        tradeQueue.get
-          .filter(t => t.data.id.toLong > backfillTrades.last.data.id.toLong)
-          .foreach(tradesReceiver ! _)
-        tradeQueue = None
+//    var tradeQueue: Option[Queue[TradeMD]] = Some(Queue.empty[TradeMD])
+//    override def receive: Receive = {
+//      case md: TradeMD =>
+//        if (tradeQueue.isDefined) {
+//          tradeQueue = tradeQueue.map(_.enqueue(md))
+//        } else {
+//          tradesReceiver ! md
+//        }
+//
+//      case backfill: Seq[BitstampTX] =>
+//        val backfillTrades = backfill.reverse.map {
+//          case BitstampTX(date, tid, price, ty, amount) =>
+//            TradeMD(NAME, pair.toString, Trade(
+//              tid,
+//              date.toLong * 1000000 + tid.toLong % 1000000,
+//              price.toDouble,
+//              amount.toDouble,
+//              if (ty.toInt == 0) Buy else Sell
+//            ))
+//        }
+//        backfillTrades.foreach(tradesReceiver ! _)
+//
+//        tradeQueue.get
+//          .filter(t => t.data.id.toLong > backfillTrades.last.data.id.toLong)
+//          .foreach(tradesReceiver ! _)
+//        tradeQueue = None
     }
-  }
 }
 
 class BitstampMarketDataSource(topics: Map[String, Json],
@@ -283,24 +281,47 @@ class BitstampMarketDataSource(topics: Map[String, Json],
 
   import BitstampMarketDataSource._
 
-  override def ingestGroup(topics: Set[String], dataType: String)
-                          (implicit sys: ActorSystem,
-                           mat: ActorMaterializer): Map[String, Source[Timestamped, NotUsed]] = {
+  val pusher = new Pusher("de504dc5763aeef9ff52")
 
-//    val dts = dataTypes.map { case (k, v) => (parseBuiltInDataType(k).get, v) }
-//
-//    val pusher = new Pusher("de504dc5763aeef9ff52")
-//
-//    pusher.connect(new ConnectionEventListener {
-//      override def onConnectionStateChange(change: ConnectionStateChange): Unit = {
-//        println("Connection state changed", change.getPreviousState, change.getCurrentState)
-//      }
-//
-//      override def onError(message: String, code: String, e: Exception): Unit = {
-//        println("ERROR", message, code, e)
-//        throw e
-//      }
-//    })
+  pusher.connect(new ConnectionEventListener {
+    override def onConnectionStateChange(change: ConnectionStateChange): Unit = {
+      println("Connection state changed", change.getPreviousState, change.getCurrentState)
+    }
+
+    override def onError(message: String, code: String, e: Exception): Unit = {
+      println("ERROR", message, code, e)
+      throw e
+    }
+  })
+
+  override def ingestGroup[T](topics: Set[String], fmt: DeltaFmtJson[T])
+                             (implicit sys: ActorSystem, mat: ActorMaterializer):
+      Future[Map[String, Source[(Long, T), NotUsed]]] = {
+    fmt match {
+      case _: DeltaFmtJson[Ladder] =>
+        // Create an order book provider for each product.
+        Future.successful(topics.map(topic => {
+          val (bookRef, src: Source[(Long, T), NotUsed]) = Source
+            .actorRef[(Long, OrderBook)](Int.MaxValue, OverflowStrategy.fail)
+
+            // Aggregate books to 10 price levels.
+            .map(md => (md._1, Ladder.fromOrderBook(10)(md._2)))
+
+            // De-dupe the books after aggregation.
+            .via(util.stream.deDupeBy(a => a))
+            .preMaterialize()
+
+          sys.actorOf(
+            Props(new BitstampOrderBookProvider(topic, pusher, bookRef)),
+            s"bitstamp-order-book-provider-$topic")
+
+          topic -> src
+        }).toMap)
+
+    }
+  }
+
+
 //
 //    dts.foreach {
 //      case (DepthBook(depth), config) =>
@@ -350,11 +371,9 @@ class BitstampMarketDataSource(topics: Map[String, Json],
 //            s"bitstamp-trades-provider-$pair")
 //        })
 //    }
-    ???
-  }
 
-  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
-    TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
+//  private def timeLog[T <: Timestamped](dataDir: String, product: String, name: String) =
+//    TimeLog[T](new File(s"$dataDir/$NAME/$product/$name"))
 
   /**
     * Additional metadata attached to each SnapshotOrder that helps us read snapshots from the
@@ -363,26 +382,27 @@ class BitstampMarketDataSource(topics: Map[String, Json],
   case class SnapshotItem(order: SnapshotOrder, micros: Long, index: Int, total: Int)
     extends Timestamped
 
-  override def stream(dataDir: String,
-                      topic: String,
-                      dataType: String,
-                      timeRange: TimeRange): Iterator[MarketData] = {
-    parseBuiltInDataType(dataType) match {
-      case Some(x) => (x, timeRange) match {
-        case (DepthBook(depth), TimeRange(from, to)) =>
-          val queue = timeLog[AggBookMD](dataDir, topic, s"book_$depth")
-          queue.scan[Long](from, _.micros, data => data.micros < to)(queue.close)
+//  override def stream(dataDir: String,
+//                      topic: String,
+//                      dataType: String,
+//                      timeRange: TimeRange): Iterator[MarketData] = {
+//    parseBuiltInDataType(dataType) match {
+//      case Some(x) => (x, timeRange) match {
+//        case (LadderType(depth), TimeRange(from, to)) =>
+//          val queue = timeLog[LadderMD](dataDir, topic, s"book_$depth")
+//          queue.scan[Long](from, _.micros, data => data.micros < to)(queue.close)
+//
+//        case (TradesType, TimeRange(from, to)) =>
+//          println("Streaming trades???", from, to)
+//          val queue = timeLog[TradeMD](dataDir, topic, "trades")
+//          queue.scan[Long](from, _.micros, data => data.micros < to) { () =>
+//            println("closing queue")
+//            queue.close()
+//          }
+//      }
+//    }
+//  }
 
-        case (Trades, TimeRange(from, to)) =>
-          println("Streaming trades???", from, to)
-          val queue = timeLog[TradeMD](dataDir, topic, "trades")
-          queue.scan[Long](from, _.micros, data => data.micros < to) { () =>
-            println("closing queue")
-            queue.close()
-          }
-      }
-    }
-  }
+//  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 
-  override def ingest(topic: String, dataType: String)(implicit sys: ActorSystem, mat: ActorMaterializer) = ???
 }

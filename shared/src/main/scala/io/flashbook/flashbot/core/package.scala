@@ -3,7 +3,6 @@ package io.flashbook.flashbot
 import java.time.Instant
 import scala.concurrent.duration._
 
-import io.flashbook.flashbot.core.MarketData.GenMD
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
 import io.flashbook.flashbot.util.time.parseDuration
 import io.flashbook.flashbot.core.Position._
@@ -43,19 +42,19 @@ package object core {
   case object Base extends PairRole
   case object Quote extends PairRole
 
-  case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped
+  case class Trade(id: String, micros: Long, price: Double, size: Double, side: Side) extends Timestamped with Priced
 
-  case class TradeMD(source: String, topic: String, data: Trade)
-    extends GenMD[Trade] with Priced {
-
-    val dataType: String = "trades"
-    def product: String = topic
-    override def micros: Long = data.micros
-
-    override def exchange: String = source
-
-    override def price: Double = data.price
-  }
+//  case class TradeMD(source: String, topic: String, data: Trade)
+//    extends GenMD[Trade] with Priced {
+//
+//    val dataType: String = "trades"
+//    def product: String = topic
+//    override def micros: Long = data.micros
+//
+//    override def exchange: String = source
+//
+//    override def price: Double = data.price
+//  }
 
   case class Quote(bidPrice: Double,
                    bidAmount: Double,
@@ -75,17 +74,19 @@ package object core {
                     bestAskPrice: Double,
                     bestAskQuantity: Double,
                     lastTradePrice: Double,
-                    lastTradeId: Long) extends Timestamped
-
-  case class TickerMD(source: String, topic: String, data: Ticker)
-    extends GenMD[Ticker] with Priced {
-
-    override def micros: Long = data.micros
-    override def dataType: String = "tickers"
-    override def exchange: String = source
-    override def product: String = topic
-    override def price: Double = data.lastTradePrice
+                    lastTradeId: Long) extends Timestamped with Priced {
+    def price = lastTradePrice
   }
+
+//  case class TickerMD(source: String, topic: String, data: Ticker)
+//    extends GenMD[Ticker] with Priced {
+//
+//    override def micros: Long = data.micros
+//    override def dataType: String = "tickers"
+//    override def exchange: String = source
+//    override def product: String = topic
+//    override def price: Double = data.lastTradePrice
+//  }
 
   case class CurrencyConfig(name: Option[String],
                             alias: Option[String])
@@ -105,8 +106,6 @@ package object core {
   }
 
   trait Priced {
-    def exchange: String
-    def product: String
     def price: Double
   }
 

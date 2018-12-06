@@ -2,15 +2,18 @@ package io.flashbook.flashbot.engine
 
 import java.io.File
 
+import de.sciss.fingertree.RangedSeq
 import io.circe.{Decoder, Encoder, Json}
 import io.circe.generic.semiauto._
 import io.circe.syntax._
 import io.circe.parser._
-import io.flashbook.flashbot.core.DataSource.Bundle
-import io.flashbook.flashbot.core.{DeltaFmt, FoldFmt, Timestamped}
+import io.flashbook.flashbot.core.DataSource.{Bundle, SliceIndex}
+import io.flashbook.flashbot.core.Slice.SliceId
+import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.IndexedDeltaLog._
 import io.flashbook.flashbot.engine.TimeLog.ScanDuration
 
+import scala.collection.immutable.{Queue, SortedSet}
 import scala.concurrent.duration._
 
 /**
@@ -21,7 +24,7 @@ import scala.concurrent.duration._
 class IndexedDeltaLog[T](path: File,
                          retention: Duration,
                          sliceSize: Duration)
-                        (implicit fmt: DeltaFmt[T]) {
+                        (implicit fmt: DeltaFmtJson[T]) {
 
   implicit private val tDe: Decoder[T] = fmt.modelDe
   implicit private val tEn: Encoder[T] = fmt.modelEn
@@ -70,29 +73,43 @@ class IndexedDeltaLog[T](path: File,
     lastData = Some(data)
   }
 
-  def scan(fromMicros: Long, toMicros: Long, polling: Boolean = false): Iterator[(T, Long)] = {
-    // Find the slice of the first item.
-    val sliceOpt = timeLog.find(fromMicros, _.micros).map(_.sliceId)
-    if (sliceOpt.isEmpty) {
-      return Iterator.empty
-    }
 
-    // Scan from the first snapshot item of this slice until we reach an time log item that
-    // is after `toMicros`.
+  def scanBundle(from: SliceId,
+                 fromMicros: Long = 0,
+                 toMicros: Long = Long.MaxValue,
+                 polling: Boolean = false): Iterator[(T, Long)] = {
+
+    // Scan from the first snapshot item of this slice until we reach a TimeLog item that
+    // is after `toMicros` OR we reach the end of the bundle.
     val wrapperIt = timeLog.scan[(SliceId, Option[SnapBound])](
-      (sliceOpt.get, Some(Start)),
+      (from, Some(Start)),
       b => (b.sliceId, b.matchBound(Start)),
-      _.micros <= toMicros,
+      w => w.micros <= toMicros && w.bundle == from.bundle,
       if (polling) ScanDuration.Continuous else ScanDuration.Finite
     )()(de, sliceBoundOrder)
 
     // Map from an iterator of wrappers to an iterator of T.
     val dataIt = wrapperIt.scanLeft[(Option[(T, Long)], Boolean)](None, false) {
+      /**
+        * Base case
+        */
       case ((None, false), snap: BundleSnap) =>
         (snap.snap.as[T].toOption.map((_, snap.micros)), snap.isEnd)
+
+      /**
+        * Pending
+        *
+        * There is a partial T and we will use the current BundleSnap to make progress on it.
+        */
       case ((Some(partial), false), snap: BundleSnap) =>
         (snap.snap.as[T].toOption.map(item =>
           (fmt.fold(partial._1, item), snap.micros)), snap.isEnd)
+
+      /**
+        * Active
+        *
+        * We have a full T in memory and we're using the current BundleDelta to update it.
+        */
       case ((dataOpt, true), delta: BundleDelta) =>
         (dataOpt.map(d =>
           (fmt.update(d._1, delta.delta.as[fmt.D].right.get), delta.micros)), true)
@@ -101,13 +118,30 @@ class IndexedDeltaLog[T](path: File,
     // Filter incomplete and out of bounds data and return.
     dataIt.filter(_._2).collect {
       case (Some(data), _) => data
-    }.filter(d => d._2 >= fromMicros && d._2 < toMicros)
+    }.filter(d => d._2 >= fromMicros && d._2 <= toMicros)
+  }
+
+  def scan(filter: SliceId => Boolean = _ => true,
+           fromMicros: Long = 0,
+           toMicros: Long = Long.MaxValue,
+           polling: Boolean = false): Iterator[Iterator[(T, Long)]] = {
+
+    // Index and filter bundles first using the predicate fn and then the time bounds.
+    var sliceIndex = index.filterId(filter).filterOverlaps(fromMicros, toMicros)
+
+    // Map each bundle to an iterator of (T, Long).
+    sliceIndex.bundles.values.map(idx =>
+      scanBundle(idx.rangedSlices.head.id, fromMicros, toMicros, polling)).toIterator
   }
 
   def close() = timeLog.close()
 
-  def index: Map[Long, Bundle] = {
-    var idx = Map.empty[Long, Bundle]
+  /**
+    * Builds a SliceIndex where the bundle key of each slice is set, but the slice key is a
+    * wildcard because. This is due to us not traversing each slice on disk during indexing.
+    */
+  def index: SliceIndex = {
+    var idx = SliceIndex.empty
     var currentSliceHead = timeLog.first
 
     if (currentSliceHead.isDefined) {
@@ -125,7 +159,7 @@ class IndexedDeltaLog[T](path: File,
       }
     }
 
-    // Foreach initial slice of all bundles find the time of the last item of the bundle.
+    // Foreach initial slice of each bundle, find the time of the last item of the prev bundle.
     while (currentSliceHead.nonEmpty) {
 
       // Find the start of the next bundle.
@@ -147,9 +181,8 @@ class IndexedDeltaLog[T](path: File,
       }
 
       // Update the index and currentSliceHead
-      idx += (currentSliceHead.get.bundle ->
-        Bundle(currentSliceHead.get.bundle, currentSliceHead.get.micros, endTime))
-
+      idx += Slice(SliceId.wildcard.copy(bundle = currentSliceHead.get.bundle),
+        currentSliceHead.get.micros, endTime, None)
       currentSliceHead = nextSliceItem
     }
 
@@ -224,9 +257,4 @@ object IndexedDeltaLog {
                         prevSliceEndMicros: Option[Long], snap: Json) extends BundleWrapper
   case class BundleDelta(bundle: Long, slice: Long, micros: Long,
                          delta: Json) extends BundleWrapper
-
-  case class SliceId(bundle: Long, slice: Long) {
-    def nextSlice = SliceId(bundle, slice + 1)
-    def nextBundle = SliceId(bundle + 1, 0)
-  }
 }

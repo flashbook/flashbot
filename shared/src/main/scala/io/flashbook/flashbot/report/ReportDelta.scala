@@ -57,14 +57,14 @@ object ReportDelta {
       case ev: RemoveValueEvent => rmValEn(ev)
     }
 
-    def putValEn[T](fmt: DeltaFmt[T], value: Any): Json = {
+    def putValEn[T](fmt: DeltaFmtJson[T], value: Any): Json = {
       value match {
         case typedValue: T =>
           fmt.modelEn(typedValue)
       }
     }
 
-    def updateDeltaEn[T](fmt: DeltaFmt[T], delta: Any): Json = {
+    def updateDeltaEn[T](fmt: DeltaFmtJson[T], delta: Any): Json = {
       delta match {
         case typedDelta: fmt.D =>
           fmt.deltaEn(typedDelta)

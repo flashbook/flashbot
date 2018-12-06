@@ -216,7 +216,6 @@ case class FuzzyBook(activeTimeRange: Duration = 1 minute,
       else Removed(time.get)
     else Unknown
   }
-
 }
 
 object FuzzyBook {

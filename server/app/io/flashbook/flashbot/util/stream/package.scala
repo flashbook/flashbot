@@ -1,9 +1,16 @@
 package io.flashbook.flashbot.util
 
 import akka.NotUsed
-import akka.actor.ActorSystem
+import akka.actor.{ActorContext, ActorPath, ActorRef, ActorSystem, RootActorPath}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings, Supervision}
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.{Flow, Source}
+import akka.pattern.ask
+import akka.util.Timeout
+import io.flashbook.flashbot.core.{DataAddress, MarketData}
+import io.flashbook.flashbot.engine.StreamResponse
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 package object stream {
 
@@ -37,5 +44,43 @@ package object stream {
       Supervision.Stop
     })
 
+  def iteratorToSource[T](it: Iterator[T])(implicit ec: ExecutionContext) = {
+    Source.unfoldAsync[Iterator[T], T](it) { memo =>
+      // TODO: Can we use Future.success and Future.failure here?
+      // I have a hunch it was causing weird errors and that's why I left it like this.
+      // ALSO: Why not use unfold instead of unfoldAsync? I think that wasn't quite working either.
+      // Gotta double check.
+      Future {
+        if (memo.hasNext) {
+          Some(memo, memo.next)
+        } else {
+          None
+        }
+      }
+    }
+  }
+
+  implicit class IterOps[T](it: Iterator[T]) {
+    def toSource(implicit ec: ExecutionContext): Source[T, NotUsed] = iteratorToSource(it)
+  }
+
+  def actorPathsAreLocal(a: ActorPath, b: ActorPath) =
+    RootActorPath(a.address) == RootActorPath(b.address)
+
+  def actorIsLocal(other: ActorRef)(implicit context: ActorContext) =
+    RootActorPath(context.self.path.address) == RootActorPath(other.path.address)
+
+  def senderIsLocal(implicit context: ActorContext) = actorIsLocal(context.sender)
+
+  implicit def toActorPath(dataAddress: DataAddress): ActorPath =
+    ActorPath.fromString(dataAddress.host.get)
+
+  trait StreamRequest[T]
+
+  implicit class StreamRequester(ref: ActorRef) {
+    def <<?[T](req: StreamRequest[T]) = (ref ? req)(Timeout(10 seconds)) match {
+      case fut: Future[StreamResponse[T]] => fut
+    }
+  }
 
 }

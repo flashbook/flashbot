@@ -28,7 +28,7 @@ trait Instrument {
     else throw new RuntimeException(s"Can't calculate default PNL for $this")
   }
 
-  def execute(exchange: String, fill: Fill, portfolio: Portfolio): Portfolio
+  def settle(exchange: String, fill: Fill, portfolio: Portfolio): Portfolio
 
   def canShort: Boolean
 
@@ -44,7 +44,7 @@ object Instrument {
     override def markPrice(prices: PriceIndex) = prices(this)
     override def canShort = false
 
-    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = {
+    override def settle(exchange: String, fill: Fill, portfolio: Portfolio) = {
       def acc(str: String) = Account(exchange, str)
       fill.side match {
         /**
@@ -91,7 +91,7 @@ object Instrument {
     override def security = None
     override def settledIn = ???
     override def markPrice(prices: PriceIndex) = ???
-    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = {
+    override def settle(exchange: String, fill: Fill, portfolio: Portfolio) = {
       throw new RuntimeException("Indexes are not tradable")
     }
     override def canShort = false
@@ -101,7 +101,7 @@ object Instrument {
     override def canShort = true
   }
   trait FuturesContract extends Derivative {
-    override def execute(exchange: String, fill: Fill, portfolio: Portfolio) = ???
+    override def settle(exchange: String, fill: Fill, portfolio: Portfolio) = ???
   }
   trait OptionsContract extends Derivative
 

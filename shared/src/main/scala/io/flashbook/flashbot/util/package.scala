@@ -1,5 +1,7 @@
 package io.flashbook.flashbot
 
+import scala.concurrent.Future
+import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 
 package object util {
@@ -18,4 +20,19 @@ package object util {
     case doubleVal(a: String, b: String) => a + b
   }
 
+  implicit class OptionOps[A](opt: Option[A]) {
+    def toTry(msg: String): Try[A] = {
+      opt
+        .map(Success(_))
+        .getOrElse(Failure(new NoSuchElementException(msg)))
+    }
+  }
+
+  implicit class OptionFutOps[A](opt: Option[A]) {
+    def toFut(msg: String): Future[A] = Future.fromTry(opt.toTry(msg))
+  }
+
+  implicit class TryFutOps[A](t: Try[A]) {
+    def toFut: Future[A] = Future.fromTry(t)
+  }
 }

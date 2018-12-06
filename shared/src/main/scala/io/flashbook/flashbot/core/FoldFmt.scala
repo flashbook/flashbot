@@ -1,17 +1,11 @@
 package io.flashbook.flashbot.core
 
-import io.circe.{Decoder, Encoder}
-
 trait FoldFmt[T] {
   def fold(x: T, y: T): T
   def unfold(x: T): (T, Option[T])
-
-  def modelEn: Encoder[T]
-  def modelDe: Decoder[T]
 }
 
 object FoldFmt {
-
   // Implemented as loop because of possible stack size concerns and I'm too
   // lazy to figure out tail call optimization.
   def unfoldData[T](data: T)(implicit fmt: FoldFmt[T]): Seq[T] = {

@@ -27,7 +27,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
     * Set and load a var. Update session. Handle errors.
     */
   def set[T : ClassTag](key: String, value: T)
-                       (implicit ctx: TradingSession, fmt: DeltaFmt[T]): Var[T] = {
+                       (implicit ctx: TradingSession, fmt: DeltaFmtJson[T]): Var[T] = {
 
     vars.get(key) match {
       /**
@@ -159,7 +159,7 @@ class VarBuffer(initialReportVals: Map[String, Any]) {
   }
 
   def persistVar[T](current: Var[T], prev: Option[T])
-                   (implicit ctx: TradingSession, fmt: DeltaFmt[T]): Unit = {
+                   (implicit ctx: TradingSession, fmt: DeltaFmtJson[T]): Unit = {
     if (prev.isDefined) {
       val deltas = fmt.diff(prev.get, current.value)
       implicit val deltaDe: Decoder[fmt.D] = fmt.deltaDe

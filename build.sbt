@@ -9,7 +9,6 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
   pipelineStages := Seq(digest, gzip),
   // triggers scalaJSPipeline when using compile or continuous compilation
   compile in Compile := ((compile in Compile) dependsOn scalaJSPipeline).value,
-  resolvers += "jitpack" at "https://jitpack.io",
   libraryDependencies ++= ((
     serviceDeps ++ networkDeps ++ jsonDeps ++ graphQLServerDeps ++
     dataStores ++ timeSeriesDeps ++ testDeps ++ statsDeps
@@ -20,7 +19,10 @@ lazy val server = (project in file("server")).settings(commonSettings).settings(
     "com.vmunier" %% "scalajs-scripts" % "1.1.2",
     "com.github.inamik.text.tables" % "inamik-text-tables" % "0.8",
     "com.lihaoyi" %% "fansi" % "0.2.5",
-    "com.github.Opetushallitus" % "scala-schema" % "2.23.0_2.12",
+    "com.github.andyglow" % "scala-jsonschema-core_2.12" % "0.0.8",
+    "com.github.andyglow" % "scala-jsonschema-api_2.12" % "0.0.8",
+    "com.github.andyglow" % "scala-jsonschema-circe-json_2.12" % "0.0.8",
+    "de.sciss" %% "fingertree" % "1.5.2",
     guice, ws,
     specs2 % Test
   )),
@@ -50,7 +52,9 @@ lazy val client = (project in file("client")).settings(commonSettings).settings(
     "apollo-boost" -> "0.1.16",
     "react-apollo" -> "2.2.2",
     "graphql-tag" -> "2.9.2",
-    "graphql" -> "14.0.2"
+    "graphql" -> "14.0.2",
+    
+    "react-jsonschema-form" -> "1.0.6"
   ),
   npmDevDependencies in Compile ++= Seq(
     "file-loader" -> "1.1.5",

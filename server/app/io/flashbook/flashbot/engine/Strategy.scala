@@ -1,15 +1,14 @@
-package io.flashbook.flashbot.core
-
+package io.flashbook.flashbot.engine
 
 import java.util.UUID
 
 import io.circe._
-import io.flashbook.flashbot.core.DataSource.{Address, DataSourceConfig}
+import io.circe.generic.semiauto._
+import io.flashbook.flashbot.core.Convert._
 import io.flashbook.flashbot.core.Instrument.CurrencyPair
-import io.flashbook.flashbot.engine.TradingSession
+import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.TradingSession.{OrderTarget, SessionReportEvent}
 import io.flashbook.flashbot.report.ReportEvent._
-import io.flashbook.flashbot.core.Convert._
 
 import scala.concurrent.Future
 
@@ -21,6 +20,12 @@ import scala.concurrent.Future
   * possibly written in other languages.
   */
 abstract class Strategy {
+
+  type Params
+  var params: this.Params = _
+//  def params = paramsOpt.get
+
+  def paramsDecoder: Decoder[this.Params]
 
   val DEFAULT = "default"
 
@@ -42,12 +47,12 @@ abstract class Strategy {
     * the `handleData` method. Each stream should complete when there is no more data, which auto
     * shuts down the strategy when all data streams complete.
     */
-  def initialize(params: Json, portfolio: Portfolio, loader: SessionLoader): Future[Seq[String]]
+  def initialize(portfolio: Portfolio, loader: SessionLoader): Future[Seq[DataPath]]
 
   /**
     * Receives streaming streaming market data from the sources declared during initialization.
     */
-  def handleData(data: MarketData)(implicit ctx: TradingSession)
+  def handleData(data: MarketData[_])(implicit ctx: TradingSession)
 
   /**
     * Receives events that occur in the system as a result of actions taken in this strategy.
@@ -179,12 +184,15 @@ abstract class Strategy {
     ctx.send(SessionReportEvent(TimeSeriesCandle(name, candle)))
   }
 
-  def resolveAddress(address: Address): Option[Iterator[MarketData]] = None
+  def resolveAddress(address: DataPath): Option[Iterator[MarketData[_]]] = None
 
   /**
     * Internal state that is used for bookkeeping by the Var type classes. This will be set
     * directly by the TradingSession initialization code.
     */
-  var buffer: Option[VarBuffer] = None
-  implicit def internalStrategyState = buffer.get
+  implicit var buffer: VarBuffer = _
+
+  protected[engine] def loadParams(jsonParams: Json): Unit = {
+    params = paramsDecoder.decodeJson(jsonParams).right.get
+  }
 }

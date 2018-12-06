@@ -1,4 +1,5 @@
 package io.flashbook.flashbot.core
-import fi.oph.scalaschema._
 
-case class StrategyInfo(schema: Schema)
+import io.circe.Json
+
+case class StrategyInfo(schema: Json)

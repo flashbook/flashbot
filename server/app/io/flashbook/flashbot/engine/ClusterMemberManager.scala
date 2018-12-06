@@ -17,16 +17,12 @@ class ClusterMemberManager extends Actor {
     .toMap
 
   override def preStart(): Unit = {
-    println("SUBSCRIBING")
     cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
       classOf[MemberEvent], classOf[ReachabilityEvent])
-    this.preStart()
   }
 
   override def postStop(): Unit = {
-    println("UNSUB")
     cluster.unsubscribe(self)
-    this.postStop()
   }
 
 

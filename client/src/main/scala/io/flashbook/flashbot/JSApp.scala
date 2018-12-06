@@ -12,7 +12,7 @@ import scala.scalajs.js.annotation.JSGlobal
 
 @js.native
 @JSGlobal
-object BacktestConfig extends js.Object {
+object BacktestSetup extends js.Object {
   def strategy: String = js.native
 }
 
@@ -30,8 +30,18 @@ object JSApp {
   }
 
   def main(args: Array[String]): Unit = {
-    val root = Option(dom.document.getElementById("report"))
-    val reportView = ReportView(name = BacktestConfig.strategy, params = paramsJson)
-    ReactDOM.render(reportView, root.get)
+    val reportRoot = Option(dom.document.getElementById("report"))
+
+    if (reportRoot.isDefined) {
+      val reportView = ReportView(name = BacktestSetup.strategy, params = paramsJson)
+      ReactDOM.render(reportView, reportRoot.get)
+    }
+
+    val backtestSetupRoot = Option(dom.document.getElementById("BacktestSetup"))
+    if (backtestSetupRoot.isDefined) {
+      val configFormRoot = Option(dom.document.getElementById("BacktestConfigForm"))
+      val foo = BacktestConfigForm(foo = "hello")
+      ReactDOM.render(foo, configFormRoot.get)
+    }
   }
 }

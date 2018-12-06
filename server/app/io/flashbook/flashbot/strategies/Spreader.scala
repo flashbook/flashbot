@@ -1,41 +1,34 @@
 package io.flashbook.flashbot.strategies
 
-import io.circe.Json
-import io.circe.generic.auto._
-import io.flashbook.flashbot.core.DataSource.DataSourceConfig
+import com.github.andyglow.jsonschema.AsCirce._
+import io.circe.generic.semiauto._
+
 import io.flashbook.flashbot.core._
-import io.flashbook.flashbot.core.AggBook._
-import io.flashbook.flashbot.engine.TradingSession
+import io.flashbook.flashbot.engine.{SessionLoader, Strategy, TradingSession}
 
-import fi.oph.scalaschema._
-import fi.oph.scalaschema.annotation._
-
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 
 class Spreader extends Strategy {
+
   def title = "Spreader"
 
-  @Description("Spreader properties")
-  case class Props(exchange: String,
-                   product: String)
+  case class Params(exchange: String, product: String)
 
-  var params: Option[Props] = None
+  def paramsDecoder = deriveDecoder[Params]
 
-//  override def info(loader: SessionLoader) = {
-//    Future.successful(StrategyInfo(SchemaFactory.default.createSchema[Props]))
-//  }
-
-  override def initialize(paramsJson: Json,
-                          portfolio: Portfolio,
-                          loader: SessionLoader) = Future.successful {
-    params = Some(paramsJson.as[Props].right.get)
-    s"${params.get.exchange}/${params.get.product}/book_10" :: Nil
+  override def info(loader: SessionLoader) = Future {
+    Some(StrategyInfo(json.Json.schema[Params].asCirce()))
   }
 
-  override def handleData(data: MarketData)(implicit ctx: TradingSession) = data match {
-    case md: AggBookMD =>
+  override def initialize(portfolio: Portfolio, loader: SessionLoader) = {
+    val src = params.exchange
+    val topic = params.product
+    loader.index.map(_.filter(s"$src/$topic/ladder").paths)
+  }
+
+  override def handleData(data: MarketData[_])(implicit ctx: TradingSession) = data match {
+    case md: MarketData[Ladder] =>
       println(md.micros, md.data.spread)
-//      val spreadBook = "spread_book".get[AggBook]
   }
-
 }

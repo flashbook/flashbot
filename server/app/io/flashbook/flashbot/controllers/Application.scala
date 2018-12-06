@@ -13,15 +13,15 @@ import akka.pattern.pipe
 import akka.pattern.ask
 import akka.util.Timeout
 import io.flashbook.flashbot.api.{BacktestSocket, BotSocket}
-import io.flashbook.flashbot.core.TimeRange
-import io.flashbook.flashbot.util._
+import io.flashbook.flashbot.core.{StrategyInfo, TimeRange}
 import io.flashbook.flashbot.engine.TradingEngine._
 import io.flashbook.flashbot.engine.{TradingEngine, TradingSession}
+import io.flashbook.flashbot.util._
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
-import scala.util.Try
+
 
 @Singleton
 class Application @Inject()(cc: ControllerComponents)
@@ -31,27 +31,18 @@ class Application @Inject()(cc: ControllerComponents)
 
   implicit val timeout: Timeout = Timeout(5 seconds)
 
-  def asyncRecover(fn: Request[AnyContent] => Future[Result]): Action[AnyContent] =
-    Action.async { req => fn(req).recover {
-      case err: Throwable => renderError(err)
-    }}
+//  def asyncRecover(fn: Request[AnyContent] => Future[Result]): Action[AnyContent] =
+//    Action.async { req => fn(req).recover {
+//      case err: EngineError => Ok(views.html.error(err))
+//    }}
 
-  def renderError(message: String, cause: Option[Throwable] = None) =
-    Ok(views.html.error(message, cause.map(_.getStackTrace)))
+  def renderError(message: String, cause: Option[EngineError] = None) =
+    Ok(views.html.error(EngineError(message, cause)))
 
-  def renderErrorFut(message: String, cause: Option[Throwable] = None) =
+  def renderErrorFut(message: String, cause: Option[EngineError] = None) =
     Future.successful(renderError(message, cause))
 
-  def renderError(err: Throwable) = err match {
-    case EngineError(msg, causeOpt) =>
-      Ok(views.html.error(msg, cause = causeOpt))
-    case e: Exception =>
-      Ok(views.html.error(e.getMessage, Option(e.getStackTrace), Option(e.getCause)))
-    case e: Throwable =>
-      Ok(views.html.error(e.getMessage, Option(e.getStackTrace), Option(e.getCause)))
-  }
-
-  def renderErrorFut(err: Throwable) = Future.successful(renderError(err))
+//  def renderErrorFut(err: Throwable) = Future.successful(Ok(views.html.error(err)))
 
   def index = Action {
     Ok(views.html.index(SharedMessages.itWorks))
@@ -65,13 +56,13 @@ class Application @Inject()(cc: ControllerComponents)
     * reconstruct and render it in React. When the backtest is over, the WebSocket is automatically
     * closed by the server.
     */
-  def backtest(strategy: String) = asyncRecover { request =>
+  def backtest(strategy: String) = Action.async { request =>
     for {
       rsp: StrategiesResponse <- Control.request[StrategiesResponse](StrategiesQuery())
       strat: StrategyResponse <- rsp.strats.find(_.name == strategy).toFut(s"Unknown strategy $strategy")
-      render <- Control.request(StrategyInfoQuery(strat.name)).map(info =>
-          renderError(s"Strategy ${strat.name}. Page not implemented."))
-    } yield render
+      infoRsp: StrategyInfoResponse <- Control.request[StrategyInfoResponse](StrategyInfoQuery(strat.name))
+//        .map(info => renderError(s"Strategy ${strat.name}. Page not implemented."))
+    } yield Ok(views.html.backtest_setup(infoRsp))
   }
 
   def backtestWS(strategy: String, from: String, to: String, balances: String): WebSocket =
@@ -87,8 +78,8 @@ class Application @Inject()(cc: ControllerComponents)
     (Control.engine.get ? TradingEngine.BotSessionsQuery(bot)).map {
       case BotSessionsResponse(_, sessions) =>
         Ok(views.html.bot(bot, sessions.lastOption))
-      case EngineError(message, cause) =>
-        Ok(views.html.error(message, cause.map(_.getStackTrace)))
+      case err: EngineError =>
+        Ok(views.html.error(err))
     }
   }
 

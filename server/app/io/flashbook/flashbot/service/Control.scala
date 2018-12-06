@@ -1,11 +1,14 @@
 package io.flashbook.flashbot.service
 
+import java.io.File
+
 import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
 import akka.cluster.Cluster
 import akka.stream.Materializer
 import akka.pattern.ask
 import akka.util.Timeout
-import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory, ConfigValueType}
+import com.typesafe.config.ConfigValueType._
 import javax.inject.{Inject, Singleton}
 import play.api.Application
 import play.api.inject.ApplicationLifecycle
@@ -13,7 +16,9 @@ import io.circe.Json
 import io.circe.parser.parse
 import io.circe.generic.auto._
 import io.circe.literal._
+import io.flashbook.flashbot.core.DataPath
 import io.flashbook.flashbot.service._
+import io.flashbook.flashbot.util.files._
 import io.flashbook.flashbot.engine.TradingEngine.StartEngine
 import io.flashbook.flashbot.engine.{DataServer, IngestService, TradingEngine, TradingSession}
 import io.flashbook.flashbot.util.stream.buildMaterializer
@@ -34,60 +39,55 @@ object Control {
   val engine = new SyncVar[ActorRef]
   val dataServer = new SyncVar[ActorRef]
 
-  def start()(implicit config: Config, app: Application, system: ActorSystem): Unit = {
+  val tmpDataDir = new SyncVar[File]
 
-    val dataPath = config.getString("flashbot.dataPath")
+  def start()(implicit config: Config, app: Application, system: ActorSystem): Unit = {
 
     // Warn if the app is already started.
     if (appStarted.take()) {
       println("Warning: App already started")
     } else println("Starting App")
 
-//    val systemConfig = config
-//      .withValue("akka.persistence.journal.leveldb.dir",
-//        ConfigValueFactory.fromAnyRef(s"$dataPath/journal"))
-//      .withValue("akka.persistence.snapshot-store.local.dir",
-//        ConfigValueFactory.fromAnyRef(s"$dataPath/snapshot-store"))
+    val baseConfigJson: Json = parse(
+      Source.fromInputStream(getClass.getResourceAsStream("/base_config.json"))
+        .getLines.mkString
+    ).right.get
 
-    val baseConfigJson: Json = parse(Source
-      .fromInputStream(getClass.getResourceAsStream("/base_config.json"))
-      .getLines.mkString).right.get
-
-//    Source.fromFile("config.json", "utf-8").getLines.mkString
-    val flashbotConfig = baseConfigJson
+    val flashbotConfig: ConfigFile = baseConfigJson
       .deepMerge(json"""{"exchanges": {}, "bots": {}}""")
       .as[ConfigFile].right.get
 
-    def getStringListOpt(path: String): Option[Seq[String]] =
-      if (config.getIsNull(path)) None else Some(config.getStringList(path).asScala)
+    def ingestMatchers: Set[DataPath] =
+      config.getStringList("flashbot.ingest").asScala.map(DataPath.parse).toSet
 
-    val activeBots = getStringListOpt("flashbot.activeBots")
-    val activeDataSources = getStringListOpt("flashbot.activeDataSources")
-    val activeTopics = getStringListOpt("flashbot.activeTopics")
-    val activeDataTypes = getStringListOpt("flashbot.activeDataTypes")
-
-    val finalBots = activeBots
-      .map(bots => flashbotConfig.bots.filterKeys(bots.contains(_)))
-      .getOrElse(flashbotConfig.bots)
-    val finalDataSources = activeDataSources
-      .map(dss => flashbotConfig.data_sources.filterKeys(dss.contains(_)))
-      .getOrElse(flashbotConfig.data_sources)
-
+    val defaultBotMatchers = config.getStringList("flashbot.defaultBots").asScala.toSet
+      .map((re: String) => ("^" + re + "$").r)
+    val defaultBots = flashbotConfig.bots.filterKeys(key =>
+      defaultBotMatchers.exists(_.findFirstIn(key).isDefined))
 
     implicit val mat: Materializer = buildMaterializer
     implicit val ec: ExecutionContext = system.dispatcher
 
+    val roles = config.getStringList("akka.cluster.roles")
+
+    // Start a DataServer
+    if (!dataServer.isSet) {
+      dataServer.put(system.actorOf(Props(new DataServer(
+        new File(config.getString("flashbot.marketDataPath")),
+        flashbotConfig.data_sources,
+        if (roles.contains("data-ingest")) ingestMatchers else Set.empty
+      )), "data-server"))
+    }
+
+
     // Start a TradingEngine
-    val roles = getStringListOpt("akka.cluster.roles").get
     if (roles.contains("trading-engine")) {
       if (!engine.isSet) {
         engine.put(system.actorOf(Props(
           new TradingEngine(
-            List(dataPath, "sources").mkString("/"),
             flashbotConfig.strategies,
-            finalDataSources,
             flashbotConfig.exchanges,
-            finalBots
+            defaultBots
           )
         ), "trading-engine"))
         engine.get ! StartEngine
@@ -96,33 +96,10 @@ object Control {
       }
     }
 
-    // Start a DataServer
-    if (roles.contains("data-server")) {
-      if (!dataServer.isSet) {
-        dataServer.put(system.actorOf(Props(
-          new DataServer(finalDataSources)
-        ), "data-server"))
-      }
-
-//      finalDataSources.keySet.foreach(srcName => {
-//        val actor = system.actorOf(Props[IngestService], s"ingest:$srcName")
-//        actor ! (
-//          srcName,
-//          List(dataPath, "sources").mkString("/"),
-//          finalDataSources,
-//          activeTopics.toSet,
-//          activeDataTypes.toSet
-//        )
-//      })
-    }
-
     appStarted.put(true)
   }
 
   def stop(): Unit = {
-
-    println("ENDING")
-
     if (!appStarted.take()) {
       println("Warning: App already stopped")
     }
@@ -145,7 +122,8 @@ object Control {
       case err: TradingEngine.EngineError => Future.failed(err)
       case err: Throwable => Future.failed(err)
       case rsp: T => Future.successful(rsp)
-      case rsp => Future.failed(new RuntimeException(s"Request type error for query $query"))
+      case rsp => Future.failed(
+        new RuntimeException(s"Request type error for query $query. Unexpected response $rsp."))
     }
 }
 

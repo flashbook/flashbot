@@ -1,24 +1,32 @@
-@(message: String, stackTrace: Option[Seq[StackTraceElement]] = None, cause: Option[Throwable] = None)
+@import io.flashbook.flashbot.engine.TradingEngine.EngineError
 
-@main(message) {
-	<h2>@message</h2>
-	@if(stackTrace.isDefined) {
+@(error: EngineError)
+
+@engineError(err: EngineError) = {
+	<h2>@err.message</h2>
+
+	@if(err.cause.isDefined) {
 		<h3>Stack trace</h3>
 		<p>
-			@for(line<-stackTrace.get) {
+			@for(line<-err.cause.get.getStackTrace) {
 				@line
 				<br />
 			}
 		</p>
-	}
 
-	@if(cause.isDefined) {
-		<h3>Cause</h3>
-		<p>
-			@for(line<-Option(cause.get.getStackTrace).getOrElse(List().toArray)) {
-				@line
-				<br />
-			}
-		</p>
+
+		@if(Option(err.cause.get.getCause).isDefined) {
+			<div>
+				@err2(EngineError(s"Cause of ${err.message}", Option(err.cause.get.getCause)))
+			</div>
+		}
 	}
+}
+
+@err2(err: EngineError) = {
+	@engineError(err)
+}
+
+@main(error.message) {
+	@engineError(error)
 }

@@ -8,11 +8,11 @@ import scala.util.matching.Regex
 
 
 package object time {
-  val msFmt: Regex = raw"([0-9]+)ms".r
-  val secondFmt: Regex = raw"([0-9]+)s".r
-  val minuteFmt: Regex = raw"([0-9]+)m".r
-  val hourFmt: Regex = raw"([0-9]+)h".r
-  val dayFmt: Regex = raw"([0-9]+)d".r
+  private val msFmt: Regex = raw"([0-9]+)ms".r
+  private val secondFmt: Regex = raw"([0-9]+)s".r
+  private val minuteFmt: Regex = raw"([0-9]+)m".r
+  private val hourFmt: Regex = raw"([0-9]+)h".r
+  private val dayFmt: Regex = raw"([0-9]+)d".r
 
   def parseDurationOpt(str: String): Option[FiniteDuration] = str match {
     case msFmt(len: String) => Some(FiniteDuration(len.toInt, MILLISECONDS))
@@ -23,7 +23,7 @@ package object time {
     case _ => None
   }
 
-  def parseDuration(str: String): FiniteDuration = parseDurationOpt(str).get
+  implicit def parseDuration(str: String): FiniteDuration = parseDurationOpt(str).get
 
   def printDurationOpt(d: FiniteDuration): Option[String] = (d.length, d.unit) match {
     case (n, MILLISECONDS) => Some(s"${n}ms")

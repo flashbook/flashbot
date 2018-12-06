@@ -1,5 +1,7 @@
 package io.flashbook.flashbot.engine
 
+import akka.NotUsed
+import akka.stream.scaladsl.Source
 import io.circe.Json
 import io.flashbook.flashbot.core.Action.ActionQueue
 import io.flashbook.flashbot.core.DataSource._
@@ -55,11 +57,10 @@ object TradingSession {
   }
 
   case class SessionSetup(instruments: InstrumentIndex,
-                          dataSourceAddresses: Seq[Address],
-                          dataSources: Map[String, DataSource],
                           exchanges: Map[String, Exchange],
                           strategy: Strategy,
                           sessionId: String,
+                          streams: Seq[Source[MarketData[_], NotUsed]],
                           sessionMicros: Long)
 
   def closeActionForOrderId(actions: ActionQueue, ids: IdManager, id: String): ActionQueue =

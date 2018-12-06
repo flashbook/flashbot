@@ -14,12 +14,13 @@ import slinky.core._
 import slinky.core.annotations.react
 import slinky.web.html.{className, div}
 
+
 @react class ReportView extends StatelessComponent {
   case class Props(name: String, params: Json)
 
   override def componentDidMount() = {
 
-    val ws = new WebSocket(s"ws://${dom.window.location.host}/backtest/${BacktestConfig.strategy}/ws")
+    val ws = new WebSocket(s"ws://${dom.window.location.host}/backtest/${BacktestSetup.strategy}/ws")
 
     ws.onopen = (e: Event) => {
       dom.window.location.search

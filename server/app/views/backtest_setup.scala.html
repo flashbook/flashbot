@@ -1,0 +1,27 @@
+@import io.flashbook.flashbot.core.StrategyInfo
+@import io.circe.Printer
+@import io.circe.syntax
+@import io.flashbook.flashbot.engine.TradingEngine.StrategyInfoResponse
+
+@(rsp: StrategyInfoResponse)
+
+@main(rsp.title) {
+	<script>
+		window.BacktestSetup = {
+			strategy: "@rsp.key",
+			info: @Html(rsp.info.map(_.schema.pretty(Printer.noSpaces)).getOrElse("null"))
+		};
+		console.log(BacktestSetup);
+	</script>
+
+	<div id="BacktestSetup">
+		<section class="section">
+			<div class="container">
+				<div class="box">
+					<h1 class="title">@rsp.title</h1>
+					<div id="BacktestConfigForm"></div>
+				</div>
+			</div>
+		</section>
+	</div>
+}

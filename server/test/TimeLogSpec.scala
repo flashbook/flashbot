@@ -1,6 +1,7 @@
 import java.io.File
 
 import io.circe.generic.auto._
+import io.flashbook.flashbot.util.files._
 import io.flashbook.flashbot.core.Order.{Buy, Sell}
 import io.flashbook.flashbot.core.Trade
 import io.flashbook.flashbot.engine.TimeLog
@@ -108,15 +109,6 @@ class TimeLogSpec extends FlatSpec with Matchers {
       ScanDuration.Finite)().toSeq shouldEqual trades.tail.reverse.tail.reverse
   }
 
-  private def deleteFile(file: File) {
-    if (!file.exists) return
-    if (file.isFile) {
-      file.delete()
-    } else {
-      file.listFiles().foreach(deleteFile)
-      file.delete()
-    }
-  }
 
   override def withFixture(test: NoArgTest) = {
     val tempFolder = System.getProperty("java.io.tmpdir")
@@ -128,7 +120,7 @@ class TimeLogSpec extends FlatSpec with Matchers {
     try {
       super.withFixture(test)
     } finally {
-      deleteFile(testFolder)
+      rmRf(testFolder)
     }
   }
 

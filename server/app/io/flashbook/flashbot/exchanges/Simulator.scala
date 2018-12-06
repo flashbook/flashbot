@@ -1,9 +1,8 @@
 package io.flashbook.flashbot.exchanges
 
-import io.flashbook.flashbot.core.AggBook.{AggBook, AggBookMD, aggFillOrder}
+import io.flashbook.flashbot.core.Ladder.ladderFillOrder
 import io.flashbook.flashbot.core.Order
 import io.flashbook.flashbot.core.Order._
-import io.flashbook.flashbot.core.OrderBook.OrderBookMD
 import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.engine.TradingSession
 
@@ -28,14 +27,14 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
 
   private var myOrders = Map.empty[String, OrderBook]
 
-  private var depths = Map.empty[String, AggBook]
+  private var depths = Map.empty[String, Ladder]
   private var prices = Map.empty[String, Double]
 
   override def makerFee: Double = base.makerFee
   override def takerFee: Double = base.takerFee
 
   override def collect(session: TradingSession,
-                       data: Option[MarketData]): (Seq[Order.Fill], Seq[OrderEvent]) = {
+                       data: Option[MarketData[_]]): (Seq[Order.Fill], Seq[OrderEvent]) = {
     var fills = Seq.empty[Order.Fill]
     var events = Seq.empty[OrderEvent]
 
@@ -61,7 +60,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
                 }
 
                 val immediateFills =
-                  aggFillOrder(depths(product), side, Some(size), None, Some(price))
+                  ladderFillOrder(depths(product), side, Some(size), None, Some(price))
                   .map { case (fillPrice, fillQuantity) =>
                     Fill(clientOid, Some(clientOid), takerFee, product, fillPrice, fillQuantity,
                       evTime, Taker, side)
@@ -87,7 +86,7 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
               case MarketOrderRequest(clientOid, side, product, size, funds) =>
                 if (depths.isDefinedAt(product)) {
                   fills = fills ++
-                    aggFillOrder(depths(product), side, size, funds.map(_ * (1 - takerFee)))
+                    ladderFillOrder(depths(product), side, size, funds.map(_ * (1 - takerFee)))
                       .map { case (price, quantity) => Fill(clientOid, Some(clientOid), takerFee,
                         product, price, quantity, evTime, Taker, side)}
 
@@ -124,51 +123,52 @@ class Simulator(base: Exchange, latencyMicros: Long = 0) extends Exchange {
 
     // Update latest depth/pricing data.
     data match {
-      case Some(md: OrderBookMD[_]) =>
+      case Some(md: MarketData[OrderBook]) =>
         // TODO: Turn aggregate full order books into aggregate depths here
         ???
-      case Some(md: AggBookMD) =>
-        depths = depths + (md.product -> md.data)
-      case Some(md: Priced) =>
-        prices = prices + (md.product -> md.price)
+      case Some(md: MarketData[Ladder]) =>
+        depths = depths + (md.topic -> md.data)
+
+      case Some(md: MarketData[Priced]) =>
+        prices = prices + (md.topic -> md.data.price)
 
       /**
         * Match trades against the aggregate book. This is a pretty naive matching strategy.
         * We should use a more precise matching engine for full order books. Also, this mutates
         * our book depths until they are overwritten by a more recent depth snapshot.
         */
-      case Some(md: TradeMD) if depths.isDefinedAt(md.product) =>
+      case Some(md: MarketData[Trade]) if depths.isDefinedAt(md.topic) =>
         // First simulate fills on the aggregate book. Remove the associated liquidity from
         // the depths.
         val simulatedFills =
-          aggFillOrder(depths(md.product), md.data.side, Some(md.data.size), None)
+          ladderFillOrder(depths(md.topic), md.data.side, Some(md.data.size), None)
         simulatedFills.foreach { case (fillPrice, fillAmount) =>
-            depths = depths + (md.product -> depths(md.product).updateLevel(
+            depths = depths + (md.topic -> depths(md.topic).updateLevel(
               md.data.side match {
                 case Buy => Ask
                 case Sell => Bid
-              }, fillPrice, depths(md.product).quantityAtPrice(fillPrice).get - fillAmount
+              }, fillPrice, depths(md.topic).quantityAtPrice(fillPrice).get - fillAmount
             ))
         }
 
         // Then use the fills to determine if any of our orders would have executed.
-        if (myOrders.isDefinedAt(md.product)) {
+        if (myOrders.isDefinedAt(md.topic)) {
           val lastFillPrice = simulatedFills.last._1
           val filledOrders = md.data.side match {
             case Buy =>
-              myOrders(md.product).asks.filter(_._1 < lastFillPrice).values.toSet.flatten
+              myOrders(md.topic).asks.filter(_._1 < lastFillPrice).values.toSet.flatten
             case Sell =>
-              myOrders(md.product).bids.filter(_._1 > lastFillPrice).values.toSet.flatten
+              myOrders(md.topic).bids.filter(_._1 > lastFillPrice).values.toSet.flatten
           }
           filledOrders.foreach { order =>
             // Remove order from private book
-            myOrders = myOrders + (md.product -> myOrders(md.product).done(order.id))
+            myOrders = myOrders + (md.topic -> myOrders(md.topic).done(order.id))
 
             // Emit OrderDone event
-            events :+= OrderDone(order.id, md.product, order.side, Filled, order.price, Some(0))
+            events :+= OrderDone(order.id, md.topic, order.side, Filled, order.price, Some(0))
 
             // Emit the fill
-            fills :+= Fill(order.id, Some(md.data.id), makerFee, md.product, order.price.get,
+            fills :+= Fill(order.id, Some(md.data.id), makerFee, md.topic, order.price.get,
               order.amount, md.micros, Maker, order.side)
           }
         }

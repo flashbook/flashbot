@@ -18,6 +18,7 @@ import io.flashbook.flashbot.core._
 import io.flashbook.flashbot.util.time.currentTimeMicros
 import io.flashbook.flashbot.util.stream.buildMaterializer
 import io.flashbook.flashbot.util.json._
+import io.flashbook.flashbot.util._
 import io.flashbook.flashbot.engine.TradingSession._
 import io.flashbook.flashbot.report.ReportEvent.{BalanceEvent, PositionEvent}
 import io.flashbook.flashbot.report._
@@ -30,9 +31,7 @@ import scala.util.{Failure, Success}
   * Creates and runs bots concurrently by instantiating strategies, loads data sources, handles
   * logging, errors, validation, bot monitoring, order execution, and persistence.
   */
-class TradingEngine(dataDir: String,
-                    strategyClassNames: Map[String, String],
-                    dataSourceConfigs: Map[String, DataSourceConfig],
+class TradingEngine(strategyClassNames: Map[String, String],
                     exchangeConfigs: Map[String, ExchangeConfig],
                     defaultBots: Map[String, BotConfig])
   extends PersistentActor with ActorLogging {
@@ -122,9 +121,7 @@ class TradingEngine(dataDir: String,
     ) =>
 
       val sessionActor = context.actorOf(Props(new TradingSessionActor(
-        dataDir,
         strategyClassNames,
-        dataSourceConfigs,
         exchangeConfigs,
         strategyKey,
         strategyParams,
@@ -220,6 +217,15 @@ class TradingEngine(dataDir: String,
 
       case StrategiesQuery() =>
         sender ! StrategiesResponse(strategyClassNames.keys.map(StrategyResponse).toList)
+
+      case StrategyInfoQuery(name) =>
+        val sessionLoader = new SessionLoader()
+        (for {
+          className <- strategyClassNames.get(name).toFut(s"Unknown strategy $name.")
+          strategy <- Future.fromTry(sessionLoader.loadNewStrategy(className))
+          title = strategy.title
+          info <- strategy.info(new SessionLoader())
+        } yield StrategyInfoResponse(title, name, info)) pipeTo sender
 
       /**
         * To resolve a backtest query, we start a trading session in Backtest mode and collect
@@ -406,7 +412,8 @@ object TradingEngine {
   case class BotSessionsResponse(id: String, sessions: Seq[TradingSessionState]) extends Response
   case class StrategyResponse(name: String) extends Response
   case class StrategiesResponse(strats: Seq[StrategyResponse]) extends Response
-  case class StrategyInfoResponse(name: String) extends Query
+  case class StrategyInfoResponse(title: String, key: String,
+                                  info: Option[StrategyInfo]) extends Response
 
   final case class EngineError(message: String, cause: Option[Throwable] = None)
     extends Exception(message, cause.orNull) with Response

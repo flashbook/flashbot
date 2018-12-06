@@ -47,7 +47,7 @@ abstract class Exchange {
     * trading session.
     */
   def collect(session: TradingSession,
-              data: Option[MarketData]): (Seq[Fill], Seq[OrderEvent]) = {
+              data: Option[MarketData[_]]): (Seq[Fill], Seq[OrderEvent]) = {
     val ret = (fills, events)
     fills = Seq.empty
     events = Seq.empty

@@ -1,9 +1,6 @@
 package io.flashbook.flashbot.core
 
-import io.flashbook.flashbot.core.AggBook.AggBookMD
-import io.flashbook.flashbot.core.MarketData.{GenMD, HasProduct, Sequenced}
 import io.flashbook.flashbot.core.Order.{Buy, Sell, Side}
-
 import scala.collection.immutable.{Queue, TreeMap}
 
 case class OrderBook(orders: Map[String, Order] = Map.empty,
@@ -106,40 +103,6 @@ case class OrderBook(orders: Map[String, Order] = Map.empty,
 }
 
 object OrderBook {
-  case class OrderBookMD[E <: RawOrderEvent](source: String,
-                                             topic: String,
-                                             seq: Long = 0,
-                                             rawEvent: Option[E] = None,
-                                             data: OrderBook = OrderBook())
-    extends GenMD[OrderBook] with Sequenced with HasProduct {
-
-    override def dataType: String = "book"
-    override def product: String = topic
-    override def micros: Long = rawEvent.get.micros
-
-    def addSnapshot(seq: Long, snapshot: Seq[SnapshotOrder]): OrderBookMD[E] = copy(
-      seq = seq,
-      data = snapshot.foldLeft(data) {
-        case (memo, SnapshotOrder(_, _, bid, id, price, size)) =>
-          memo.open(id, price, size, if (bid) Buy else Sell)
-      }
-    )
-
-    def getSnapshot: Seq[SnapshotOrder] = data.orders.values.map {
-      case Order(id, side, amount, Some(price)) =>
-        SnapshotOrder(product.toString, seq, side == Buy, id, price, amount)
-    }.toSeq
-
-    def addEvent(event: E): OrderBookMD[E] = copy(
-      seq = event.seq,
-      data = data.processOrderEvent(event.toOrderEvent),
-      rawEvent = Some(event)
-    )
-
-    def toAggBookMD(depth: Int) =
-      AggBookMD(source, topic, micros, AggBook.fromOrderBook(depth)(data))
-  }
-
   final case class SnapshotOrder(product: String,
                                  seq: Long,
                                  bid: Boolean,

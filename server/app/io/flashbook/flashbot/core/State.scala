@@ -20,7 +20,7 @@ object State {
 
   trait Get[T] {
     def get(key: String)
-           (implicit ctx: TradingSession, buffer: VarBuffer, fmt: DeltaFmt[T],
+           (implicit ctx: TradingSession, buffer: VarBuffer, fmt: DeltaFmtJson[T],
             ct: ClassTag[T]): Option[Var[T]]
   }
 
@@ -38,7 +38,7 @@ object State {
     // Variety 3 usage
     def get[T: Get](key: String)
                                    (implicit ctx: TradingSession, buffer: VarBuffer,
-                                    fmt: DeltaFmt[T], ct: ClassTag[T]): Option[Var[T]] =
+                                    fmt: DeltaFmtJson[T], ct: ClassTag[T]): Option[Var[T]] =
       Get[T].get(key)
   }
 
@@ -55,7 +55,7 @@ object State {
   trait Update[T] {
     def update(x: Var[T], fn: T => Option[T])
               (implicit ctx: TradingSession, buffer: VarBuffer,
-               fmt: DeltaFmt[T], ct: ClassTag[T]): Option[Var[T]]
+               fmt: DeltaFmtJson[T], ct: ClassTag[T]): Option[Var[T]]
   }
   object Update {
     def apply[T : Update](implicit tc: Update[T], ct: ClassTag[T]): Update[T] = tc
@@ -64,11 +64,11 @@ object State {
 
   trait Set[T] {
     def set(x: String, value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                                 fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T]
+                                 fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T]
     def set(x: Var[T], value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                                 fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T]
+                                 fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T]
     def setDefault(x: String, value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                                        fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T]
+                                        fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T]
   }
   object Set {
     def apply[T : Set](implicit tc: Set[T], ct: ClassTag[T]): Set[T] = tc
@@ -84,7 +84,7 @@ object State {
     //   2. Extend AnyVal
     implicit class UpdateOps[T](val x: Var[T]) extends AnyVal {
       def update(fn: T => Option[T])
-                (implicit ctx: TradingSession, buffer: VarBuffer, fmt: DeltaFmt[T],
+                (implicit ctx: TradingSession, buffer: VarBuffer, fmt: DeltaFmtJson[T],
                  ct: ClassTag[T]): Option[Var[T]] =
         Update[T].update(x, fn)
     }
@@ -96,47 +96,47 @@ object State {
 
     implicit class SetOps[T](val x: String) extends AnyVal {
       def set(value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                        fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] =
+                        fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] =
         Set[T].set(x, value)
 
       def setDefault(value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                               fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] =
+                               fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] =
         Set[T].set(x, value)
     }
 
     implicit class SetOps2[T](val x: Var[T]) extends AnyVal {
       def set(value: T)(implicit ctx: TradingSession, buffer: VarBuffer,
-                        fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] =
+                        fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] =
         Set[T].set(x, value)
     }
 
     // Actually we'll add a "get" operation on String.
     implicit class GetOps(val x: String) extends AnyVal {
       def get[T : Get](implicit ctx: TradingSession, buffer: VarBuffer,
-                       fmt: DeltaFmt[T], ct: ClassTag[T]): Option[Var[T]] =
+                       fmt: DeltaFmtJson[T], ct: ClassTag[T]): Option[Var[T]] =
         Get[T].get(x)
     }
 
     implicit def tcGet[T]: Get[T] = new Get[T] {
       def get(key: String)(implicit ctx: TradingSession, buffer: VarBuffer,
-                           fmt: DeltaFmt[T], ct: ClassTag[T]): Option[Var[T]] =
+                           fmt: DeltaFmtJson[T], ct: ClassTag[T]): Option[Var[T]] =
         buffer.get[T](key)
     }
 
     implicit def tcSet[T]: Set[T] = new Set[T] {
       def set(key: String, value: T)
              (implicit ctx: TradingSession, buffer: VarBuffer,
-              fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] =
+              fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] =
         buffer.set[T](key, value)
 
       def set(x: Var[T], value: T)
              (implicit ctx: TradingSession, buffer: VarBuffer,
-              fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] =
+              fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] =
         buffer.set[T](x.key, value)
 
       def setDefault(key: String, value: T)
                     (implicit ctx: TradingSession, buffer: VarBuffer,
-                     fmt: DeltaFmt[T], ct: ClassTag[T]): Var[T] = {
+                     fmt: DeltaFmtJson[T], ct: ClassTag[T]): Var[T] = {
         val existing = buffer.get[T](key)
         if (existing.isDefined) existing.get
         else buffer.set[T](key, value)
@@ -146,7 +146,7 @@ object State {
     implicit def tcUpdate[T]: Update[T] = new Update[T] {
       def update(x: Var[T], fn: T => Option[T])
                 (implicit ctx: TradingSession, buffer: VarBuffer,
-                 fmt: DeltaFmt[T], ct: ClassTag[T]): Option[Var[T]] = {
+                 fmt: DeltaFmtJson[T], ct: ClassTag[T]): Option[Var[T]] = {
         // Get the var, to ensure it's a valid reference.
         val v = buffer.get[T](x.key)
         // Run the update fn and set it, or delete if None.
